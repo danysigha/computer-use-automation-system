@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Teller Sign-On — Atlas Core Console</title>
+  <style>
+    body { font: 13px/1.45 Arial, Helvetica, sans-serif; margin: 0; background: #d6dae0; color: #131820; }
+    .panel { padding: 40px 18px; max-width: 420px; }
+    h1 { font-size: 15px; margin: 0 0 12px; }
+    .form-table { border-collapse: collapse; }
+    .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #4c5866; padding: 8px 0 2px; }
+    input { font: inherit; padding: 3px 4px; border: 1px solid #7b8794; background: #fff; }
+    button { font: inherit; padding: 3px 14px; }
+    .banner { background: #fbe3e3; border: 1px solid #b42318; padding: 8px 10px; margin: 0 0 12px; }
+    .note { color: #4c5866; }
+  </style>
+</head>
+<body>
+<div class="panel">
+  <h1>Teller Sign-On</h1>
+  <!-- The session-expired sim lands here (PLAN §10 G6). Completing the form returns
+       the session to whatever the flow was trying to reach, so a run can resume past
+       the interrupted step instead of restarting. -->
+  <p class="note">Your console session ended. Sign on to continue.</p>
+<!--{{ERROR}}-->
+  <form method="post" action="/login">
+    <input type="hidden" name="next" value="{{NEXT}}">
+    <table class="form-table">
+      <tr><td class="field-label">Teller ID</td></tr>
+      <tr><td><input type="text" name="tellerId" aria-label="Teller ID" size="12" autocomplete="off"></td></tr>
+      <tr><td class="field-label">Password</td></tr>
+      <tr><td><input type="password" name="password" aria-label="Password" size="12" autocomplete="off"></td></tr>
+      <tr><td class="field-label">&nbsp;</td></tr>
+      <tr><td><button type="submit">Sign on</button></td></tr>
+    </table>
+  </form>
+  <p class="note">Fixture credentials (synthetic): teller1 / atlas-demo</p>
+</div>
+</body>
+</html>

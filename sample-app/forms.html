@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>New Sub-Account — Atlas Core Console</title>
+  <style>
+    body { font: 13px/1.45 Arial, Helvetica, sans-serif; margin: 0; background: #d6dae0; color: #131820; }
+    iframe.chrome { display: block; width: 100%; height: 82px; border: 0; border-bottom: 2px solid #7b8794; }
+    .panel { padding: 14px 18px; }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    .form-table { border-collapse: collapse; }
+    .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #4c5866; padding: 8px 0 2px; }
+    input[type=text], select { font: inherit; padding: 3px 4px; border: 1px solid #7b8794; background: #fff; }
+    button { font: inherit; padding: 3px 14px; }
+    .banner { background: #fbe3e3; border: 1px solid #b42318; padding: 8px 10px; margin: 0 0 12px; }
+    .note { color: #4c5866; }
+  </style>
+</head>
+<body>
+<iframe class="chrome" src="/header" title="Console header"></iframe>
+<div class="panel">
+  <h1>New Sub-Account — Member {{MEMBER_ID}}</h1>
+<!--{{ERRORS}}-->
+  <form method="post" action="/member/{{MEMBER_ID}}/subaccount">
+    <table class="form-table">
+      <tr><td class="field-label">Sub-account type</td></tr>
+      <tr><td>
+        <select name="type" aria-label="Sub-account type">
+<!--{{OPTIONS}}-->
+        </select>
+      </td></tr>
+      <tr><td class="field-label">Initial deposit</td></tr>
+      <tr><td><input type="text" name="deposit" aria-label="Initial deposit" size="12" value="{{DEPOSIT}}" autocomplete="off"></td></tr>
+      <tr><td class="field-label">Nickname</td></tr>
+      <tr><td><input type="text" name="nickname" aria-label="Nickname" size="18" value="{{NICKNAME}}" autocomplete="off"></td></tr>
+      <!-- The legacy control: no `label[for]`, no accessible name. Text alone can
+           never reach it, which is exactly why a positional strategy has to exist —
+           and why it is the last resort rather than the first. -->
+      <tr><td>Branch code</td></tr>
+      <tr><td><input type="text" name="branch" size="6" value="{{BRANCH}}" autocomplete="off"></td></tr>
+      <tr><td class="field-label">&nbsp;</td></tr>
+      <tr><td><button type="submit">Continue</button></td></tr>
+    </table>
+  </form>
+  <p class="note">Sub-accounts post to the core ledger on activation.</p>
+</div>
+</body>
+</html>

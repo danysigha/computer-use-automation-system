@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Cached separately from node_modules: the browser build is the slow part of a
+      # cold CI run, and it only needs to be re-fetched when dependencies change.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Not redundant with `npm test`: this runs the real entry point through plain
+      # `node`, which is the path an evaluator takes and the one that catches a
+      # non-erasable construct or a relative import missing its `.ts` extension.
+      - name: Runtime smoke (plain node, real ESM resolution)
+        run: node scripts/smoke.ts

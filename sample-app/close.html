@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Close Account — Atlas Core Console</title>
+  <style>
+    body { font: 13px/1.45 Arial, Helvetica, sans-serif; margin: 0; background: #d6dae0; color: #131820; }
+    iframe.chrome { display: block; width: 100%; height: 82px; border: 0; border-bottom: 2px solid #7b8794; }
+    .panel { padding: 14px 18px; }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    .form-table { border-collapse: collapse; }
+    .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #4c5866; padding: 8px 0 2px; }
+    input[type=text] { font: inherit; padding: 3px 4px; border: 1px solid #7b8794; background: #fff; }
+    button { font: inherit; padding: 3px 14px; }
+    .banner { background: #fbe3e3; border: 1px solid #b42318; padding: 8px 10px; margin: 0 0 12px; }
+    .note { color: #4c5866; }
+  </style>
+</head>
+<body>
+<iframe class="chrome" src="/header" title="Console header"></iframe>
+<div class="panel">
+  <h1>Close Account</h1>
+  <p class="note">Member {{MEMBER_ID}}</p>
+  <!-- An irreversible action. Policy gates the click on the control that submits it,
+       not on this page — the guard belongs at the choke point, not in the copy. -->
+  <div class="banner" role="alert">
+    <p>Closing an account posts immediately to the core ledger and cannot be undone at the teller terminal.</p>
+  </div>
+  <form method="post" action="/member/{{MEMBER_ID}}/close-account">
+    <table class="form-table">
+      <tr><td class="field-label">Reason code</td></tr>
+      <tr><td><input type="text" name="reasonCode" aria-label="Reason code" size="8" autocomplete="off"></td></tr>
+      <tr><td class="field-label">&nbsp;</td></tr>
+      <tr><td><button type="submit">Close account</button></td></tr>
+    </table>
+  </form>
+</div>
+</body>
+</html>

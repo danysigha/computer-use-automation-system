@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Atlas Core Console — Member Inquiry</title>
+  <style>
+    body { font: 13px/1.45 Arial, Helvetica, sans-serif; margin: 0; background: #d6dae0; color: #131820; }
+    iframe.chrome { display: block; width: 100%; height: 82px; border: 0; border-bottom: 2px solid #7b8794; }
+    .layout { width: 100%; border-collapse: collapse; }
+    .panel { vertical-align: top; padding: 14px 18px; }
+    h1, h2 { font-size: 15px; margin: 0 0 10px; }
+    .form-table { border-collapse: collapse; }
+    .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #4c5866; padding: 8px 0 2px; }
+    input[type=text] { font: inherit; padding: 3px 4px; border: 1px solid #7b8794; background: #fff; }
+    button { font: inherit; padding: 3px 14px; }
+    .banner { background: #fdf4d6; border: 1px solid #c8a52a; padding: 8px 10px; margin: 0 0 10px; }
+    .note { color: #4c5866; }
+  </style>
+</head>
+<body>
+<!-- The console chrome lives in its own frame, the way a frameset-era core app does:
+     anything targeting it needs a frame path, not a top-level selector. -->
+<iframe class="chrome" src="/header" title="Console header"></iframe>
+<!--{{NOTE}}-->
+<table class="layout">
+  <tr>
+    <td class="panel" width="55%">
+      <h1>Member Inquiry</h1>
+      <!-- Labels are text cells, not `label[for]` — the inputs carry accessible names
+           instead, which is what a screen-reader-operable core app would ship. -->
+      <form method="get" action="/search">
+        <table class="form-table">
+          <tr><td class="field-label">Member ID</td></tr>
+          <tr><td><input type="text" name="memberId" aria-label="Member ID" size="14" autocomplete="off"></td></tr>
+          <tr><td class="field-label">&nbsp;</td></tr>
+          <tr><td><button type="submit">Search</button></td></tr>
+        </table>
+      </form>
+    </td>
+    <td class="panel">
+      <h2>Search Tips</h2>
+      <p class="note">Enter the member number exactly as it appears on the signature card.</p>
+      <p class="note">Account balances appear on the member summary grid.</p>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

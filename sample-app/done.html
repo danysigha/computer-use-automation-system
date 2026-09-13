@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sub-Account Activated — Atlas Core Console</title>
+  <style>
+    body { font: 13px/1.45 Arial, Helvetica, sans-serif; margin: 0; background: #d6dae0; color: #131820; }
+    iframe.chrome { display: block; width: 100%; height: 82px; border: 0; border-bottom: 2px solid #7b8794; }
+    .panel { padding: 14px 18px; }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    .banner { background: #e6f4ea; border: 1px solid #1a7f42; padding: 8px 10px; margin: 0 0 12px; }
+    .note { color: #4c5866; }
+    a { color: #1d4ed8; }
+  </style>
+</head>
+<body>
+<iframe class="chrome" src="/header" title="Console header"></iframe>
+<div class="panel">
+  <h1>Sub-Account Activated</h1>
+  <div class="banner" role="alert">
+    <p>Sub-account opened for member {{MEMBER_ID}}.</p>
+  </div>
+  <p class="note">The new sub-account appears on the member summary grid immediately.</p>
+  <p><a href="/member/{{MEMBER_ID}}/summary">Return to member summary</a></p>
+</div>
+</body>
+</html>

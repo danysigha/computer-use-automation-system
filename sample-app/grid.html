@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Account Balances — Atlas Core Console</title>
+  <style>
+    body { font: 12px/1.4 Arial, Helvetica, sans-serif; margin: 0; padding: 10px 12px; background: #eef1f5; color: #131820; }
+    h1 { font-size: 13px; margin: 0 0 8px; }
+    table.grid { border-collapse: collapse; background: #fff; }
+    table.grid th, table.grid td { border: 1px solid #93a0b0; padding: 3px 10px; text-align: left; }
+    table.grid th { background: #dde3ea; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    a { color: #1d4ed8; }
+  </style>
+</head>
+<body>
+<h1>Account Balances — Member {{MEMBER_ID}}</h1>
+<!-- The flagship legacy grid: it lives in its own frame, so reading "the Balance
+     column of the Savings row" composes a row-relative target with a frame path. -->
+<table class="grid">
+  <thead>
+    <tr><th>Account</th><th>Type</th><th>Balance</th><th>Opened</th><th>Status</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+<!--{{ROWS}}-->
+  </tbody>
+</table>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Working docs — review scaffolding, not deliverables (PLAN §11 P8 / §15).
+# They live on the `docs/plan` branch; the public history must not carry them.
+PLAN.md
+TODOS.md
+assignment.txt
+
+# Dependencies / build output
+node_modules/
+coverage/
+*.tsbuildinfo
+
+# Local environment (never commit keys). `.env.example` IS committed.
+.env
+.env.local
+.env.*.local
+
+# Test artifacts
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# OS / editor
+.DS_Store
+.claude/settings.local.json

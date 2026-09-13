@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Application Error — Atlas Core Console</title>
+  <style>
+    body { font: 13px/1.45 Arial, Helvetica, sans-serif; margin: 0; background: #d6dae0; color: #131820; }
+    iframe.chrome { display: block; width: 100%; height: 82px; border: 0; border-bottom: 2px solid #7b8794; }
+    .panel { padding: 14px 18px; }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    .banner { background: #fbe3e3; border: 1px solid #b42318; padding: 8px 10px; margin: 0 0 12px; }
+    .note { color: #4c5866; }
+  </style>
+</head>
+<body>
+<iframe class="chrome" src="/header" title="Console header"></iframe>
+<div class="panel">
+  <h1>Application Error</h1>
+  <!-- Deliberately an un-declared state: the wording matches no business-outcome
+       signature, so a replay that lands here must fail cleanly rather than guess. -->
+  <div class="banner" role="alert">
+    <p>An unexpected condition occurred. Reference: {{REFERENCE}}.</p>
+  </div>
+  <p class="note">The request could not be completed. Contact the core support desk and quote the reference above.</p>
+</div>
+</body>
+</html>
