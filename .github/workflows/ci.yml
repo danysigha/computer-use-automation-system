@@ -41,3 +41,10 @@ jobs:
       # non-erasable construct or a relative import missing its `.ts` extension.
       - name: Runtime smoke (plain node, real ESM resolution)
         run: node scripts/smoke.ts
+
+      # The spike's dry-run walks the whole model-facing path — observe → digest → tool call
+      # → index → live element → recorded target chain → executed action — with a scripted
+      # decider in the model's seat. No API key, so it runs here; the model half is the one
+      # thing CI cannot cover (see scripts/spike.ts).
+      - name: Discovery spike (dry-run, no API key)
+        run: npm run spike -- --dry-run

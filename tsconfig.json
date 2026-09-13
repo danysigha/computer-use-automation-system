@@ -1,7 +1,10 @@
 {
   "compilerOptions": {
     "target": "esnext",
-    "lib": ["esnext"],
+    // `dom` is here for the code that runs *inside* the page (target resolution's
+    // row-relative walk, accessible-name derivation). Node-side files still get
+    // @types/node; the two sets coexist.
+    "lib": ["esnext", "dom", "dom.iterable"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "types": ["node"],

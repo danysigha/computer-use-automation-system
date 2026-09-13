@@ -10,6 +10,7 @@
   },
   "scripts": {
     "app": "node sample-app/server.ts",
+    "spike": "node scripts/spike.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
