@@ -180,31 +180,57 @@ function modelDecider(client: OpenAI): Decider {
     "You drive a legacy bank console through the numbered digest of its accessibility tree.",
     "Each line is one node: [index] role \"name\" [state]. A table renders one row per line.",
     "Indices are stable for the snapshot you were given; refer to nodes by index.",
-    "Take one action per turn, then observe the new digest. When the goal is met, call markComplete.",
-    `Goal: ${GOAL.question}`,
+    "Take one action per turn, then observe the new digest.",
+    // The first live run answered this in prose — correctly, but without ever declaring
+    // completion, so the run could not finish. Saying the rule outright is the cheap fix; the
+    // nudge below is the one that catches a model that ignores it.
+    "Every turn must end in exactly one tool call; never answer in prose.",
+    `When the goal is met, call markComplete with its outputs. Goal: ${GOAL.question}`,
   ].join(" ");
 
   return async (turn) => {
-    const input: ResponseInputItem[] = [
+    const opening: ResponseInputItem[] = [
       { role: "user", content: `Step ${turn.step}. Current state:\n\n${turn.digest}` },
     ];
-    const response = await client.responses.create({
-      model: MODEL,
-      instructions: system,
-      input,
-      tools: TOOLS,
-      tool_choice: "auto",
-    });
+    let prose = "";
 
-    const call = response.output.find(
-      (item): item is ResponseFunctionToolCall => item.type === "function_call",
-    );
-    if (call === undefined) {
-      throw new Error(
-        `the model answered without calling a tool: ${response.output_text.slice(0, 400) || "(empty)"}`,
+    // Two attempts, because "answered in prose" is a recoverable protocol slip rather than a
+    // failure of the run: the model usually means "I am done", and just has to be told to say so
+    // through the tool. `tool_choice: "required"` should make the second attempt unnecessary —
+    // the retry is here because a spike that dies on the first slip would hide the observation
+    // that matters (that the digest was understood) behind one that does not.
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const input: ResponseInputItem[] =
+        attempt === 1
+          ? opening
+          : [
+              ...opening,
+              {
+                role: "user",
+                content:
+                  `You replied in prose: ${JSON.stringify(prose)}. Every turn must end in a tool ` +
+                  "call. If the goal is met, call markComplete with its outputs.",
+              },
+            ];
+
+      const response = await client.responses.create({
+        model: MODEL,
+        instructions: system,
+        input,
+        tools: TOOLS,
+        tool_choice: "required",
+      });
+
+      const call = response.output.find(
+        (item): item is ResponseFunctionToolCall => item.type === "function_call",
       );
+      if (call !== undefined) return { tool: call.name, args: parseArguments(call.arguments) };
+
+      prose = response.output_text.trim();
+      process.stdout.write(`  · replied in prose (${JSON.stringify(prose.slice(0, 120))}); asked for a tool call\n`);
     }
-    return { tool: call.name, args: parseArguments(call.arguments) };
+
+    throw new Error(`the model never called a tool; its answer was: ${prose || "(empty)"}`);
   };
 }
 

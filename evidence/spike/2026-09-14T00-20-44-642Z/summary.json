@@ -1,0 +1,8 @@
+{
+  "goal": "member-savings-balance",
+  "dryRun": false,
+  "model": "gpt-5.4-mini",
+  "outputs": null,
+  "failure": "the model answered without calling a tool: Member 12345’s Savings account balance is $4,201.55.",
+  "steps": 2
+}
