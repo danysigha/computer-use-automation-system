@@ -39,6 +39,8 @@ import type {
   ResponseInputItem,
 } from "openai/resources/responses/responses";
 import { configFromEnv, startServer } from "../sample-app/server.ts";
+import { Policy } from "../src/policy/policy.ts";
+import { redactorFor } from "../src/policy/redact.ts";
 import { captureTarget } from "../src/surface/capture.ts";
 import { SessionDriver, type SurfaceAction } from "../src/surface/session-driver.ts";
 import type { Snapshot, SnapshotNode } from "../src/surface/observer.ts";
@@ -432,7 +434,16 @@ async function main(): Promise<number> {
   const logPath = join(runDir, "run.jsonl");
 
   const app = await startServer({ ...configFromEnv(), port: 0 });
-  const driver = await SessionDriver.launch({ evidenceDir: runDir });
+  // The real policy, with one override: this run's fixture is on an ephemeral port, and an
+  // allowlist that does not name the origin it runs against is the §5.4 preflight failure — not
+  // something to build a spike on top of.
+  const policy = await Policy.load({ overrides: { allowlist: { origins: [app.url] } } });
+  const redactor = redactorFor(policy);
+  const driver = await SessionDriver.launch({
+    evidenceDir: runDir,
+    policy,
+    redactor,
+  });
   const decider: Decider = dryRun ? scriptedDecider : modelDecider(new OpenAI());
 
   const history: StepRecord[] = [];
@@ -440,7 +451,9 @@ async function main(): Promise<number> {
   let failure: string | null = null;
 
   try {
-    await driver.goto(`${app.url}/`);
+    // The entry navigation goes through the choke point like every other action — there is no
+    // un-reviewed door to the page, which is the property §3 key-1 is about.
+    await driver.execute({ kind: "navigate", url: `${app.url}/` });
     process.stdout.write(
       `spike: goal ${GOAL.id} · ${dryRun ? "dry-run (scripted oracle)" : `model ${MODEL}`} · ${app.url}\n`,
     );
@@ -453,8 +466,12 @@ async function main(): Promise<number> {
       const { record, outputs: completed } = await applyDecision(driver, decider, decision, snapshot);
       const entry: StepRecord = { step, digest, ...record };
       history.push(entry);
-      await appendFile(logPath, `${JSON.stringify(entry)}\n`);
-      process.stdout.write(`  ${step}. ${entry.tool} ${JSON.stringify(entry.args)} → ${entry.outcome}\n`);
+      // Every write below is a sink in the §6 sense — `digest` is a render of the live page and
+      // `args` is what the model typed — so the spike's own log and stdout go through the run's
+      // redactor, the same one the driver registers typed values with. The discovery script is not
+      // exempt from the rule it exists to inform.
+      await appendFile(logPath, `${redactor.serialize(entry)}\n`);
+      process.stdout.write(`  ${step}. ${entry.tool} ${redactor.serialize(entry.args)} → ${entry.outcome}\n`);
 
       if (completed !== null) outputs = completed;
     }
@@ -470,13 +487,16 @@ async function main(): Promise<number> {
     await app.close();
   }
 
-  await writeFile(join(runDir, "summary.json"), `${JSON.stringify({ goal: GOAL.id, dryRun, model: MODEL, outputs, failure, steps: history.length }, null, 2)}\n`);
+  await writeFile(
+    join(runDir, "summary.json"),
+    `${redactor.serialize({ goal: GOAL.id, dryRun, model: MODEL, outputs, failure, steps: history.length }, 2)}\n`,
+  );
 
   if (failure !== null) {
-    process.stderr.write(`spike FAILED: ${failure}\n  evidence: ${runDir}\n`);
+    process.stderr.write(`spike FAILED: ${redactor.scrubText(failure)}\n  evidence: ${runDir}\n`);
     return 1;
   }
-  process.stdout.write(`spike OK: ${JSON.stringify(outputs)}\n  evidence: ${runDir}\n`);
+  process.stdout.write(`spike OK: ${redactor.serialize(outputs)}\n  evidence: ${runDir}\n`);
   return 0;
 }
 

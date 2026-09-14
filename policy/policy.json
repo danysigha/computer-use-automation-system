@@ -1,0 +1,36 @@
+{
+  "allowlist": {
+    "origins": ["http://localhost:4173"],
+    "routes": [{ "pattern": "^/member/", "allow": true }],
+    "denyRoutes": ["/admin/"],
+    "actions": ["navigate", "click", "type", "select", "press", "wait", "read", "extract", "screenshot"]
+  },
+  "risk": {
+    "approvalRequired": [
+      {
+        "matches": { "action": "click", "text": "Close account" },
+        "note": "irreversible: closes the member's account"
+      },
+      {
+        "matches": { "action": "type", "fieldName": "/password|ssn|taxid/i" },
+        "note": "sensitive field"
+      }
+    ]
+  },
+  "redact": {
+    "fieldPatterns": ["password", "ssn", "account_number"],
+    "outputIds": []
+  },
+  "recoverableDialogs": [{ "text": "/confirm activation of account/i", "response": "accept" }],
+  "timing": {
+    "waitForMs": 10000,
+    "retries": 2,
+    "backoffMs": [1000, 3000],
+    "escalationTimeoutMs": 600000
+  },
+  "agent": {
+    "maxToolCalls": 25,
+    "noProgressActions": 5,
+    "repeatLimit": 3
+  }
+}
