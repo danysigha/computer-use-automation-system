@@ -18,6 +18,7 @@
  */
 import {
   capabilitySchema,
+  isUsableName,
   placeholdersIn,
   type Capability,
   type StateAssertion,
@@ -54,6 +55,38 @@ const RESERVED_PARAM_NAMES: ReadonlySet<string> = new Set([
 
 /** §4.1's reserved flag set, in the order the plan writes it, for the rename hint. */
 const RESERVED_LIST = "version/entry/policy/json/goal/headed/param/allow-drift";
+
+/**
+ * Why this string cannot be a declared input's name — or `null` when it can.
+ *
+ * The pre-run form of the rule `checkNamesAreUnambiguous` and the schema's own `NAME_PATTERN` enforce
+ * on a finished artifact. §5.4's boundary is what it is for: a `discover --param 2fast=x` must exit 2
+ * with a fix *before* a model is called, not surface later as a `VALIDATION_ERROR` business outcome
+ * or, worse, as an artifact that fails to save after a run has already been paid for.
+ *
+ * The wording matches the artifact's own messages, because a caller who hits this at the CLI and
+ * again in a saved file should read the same sentence twice rather than wonder if it is one problem.
+ */
+export function paramNameProblem(name: string): string | null {
+  if (name === "") return "an input name cannot be empty";
+  if (!isUsableName(name)) {
+    return `"${name}" is not usable as a {placeholder} — names start with a letter or underscore and continue with letters, digits, underscores or dashes`;
+  }
+  return RESERVED_PARAM_NAMES.has(name) ? reservedNameMessage(name) : null;
+}
+
+/**
+ * The reserved-flag half, on its own so the pre-run check and the artifact check say the same words.
+ * They are separate entry points on purpose: here the *shape* of a name is `NAME_PATTERN`'s business
+ * in the schema above, and reporting it a second time from `crossChecks` would show an author the
+ * same problem twice under two paths.
+ */
+function reservedNameMessage(name: string): string {
+  return (
+    `"${name}" collides with the reserved CLI flag set (${RESERVED_LIST}); ` +
+    `rename it — the flag grammar would make --${name} ambiguous`
+  );
+}
 
 /**
  * Validate an artifact of unknown provenance — a freshly recorded one (P4), a file off disk (the
@@ -139,12 +172,7 @@ function crossChecks(capability: Capability): ValidationIssue[] {
 function checkNamesAreUnambiguous(check: Check): void {
   for (const [index, param] of check.capability.inputs.entries()) {
     if (!RESERVED_PARAM_NAMES.has(param.name)) continue;
-    check.issues.push({
-      path: `inputs.${index}.name`,
-      message:
-        `"${param.name}" collides with the reserved CLI flag set (${RESERVED_LIST}); ` +
-        `rename it — the flag grammar would make --${param.name} ambiguous`,
-    });
+    check.issues.push({ path: `inputs.${index}.name`, message: reservedNameMessage(param.name) });
   }
 
   duplicateNames(check.capability.inputs.map((param) => param.name), "inputs", check.issues);

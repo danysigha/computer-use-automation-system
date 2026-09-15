@@ -22,6 +22,26 @@
     "outputIds": []
   },
   "recoverableDialogs": [{ "text": "/confirm activation of account/i", "response": "accept" }],
+  "outcomes": [
+    {
+      "code": "NO_SUCH_ENTITY",
+      "message": "No member {memberId} on file",
+      "sample": "No member 99999 on file",
+      "pattern": "No member \\d{5} on file"
+    },
+    {
+      "code": "RECORD_LOCKED",
+      "message": "Member {memberId} is locked",
+      "sample": "Member 12345 is locked",
+      "pattern": "Member \\d{5} is locked"
+    },
+    {
+      "code": "PERMISSION_DENIED",
+      "message": "Access to member {memberId} is restricted",
+      "sample": "Access to member 12345 is restricted",
+      "pattern": "Access to member \\d{5} is restricted"
+    }
+  ],
   "timing": {
     "waitForMs": 10000,
     "retries": 2,

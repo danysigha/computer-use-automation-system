@@ -1,0 +1,170 @@
+{
+  "schemaVersion": "1.0",
+  "id": "member-savings-balance",
+  "name": "Look up member 12345 and read their current savings balance",
+  "description": "Look up member 12345 and read their current savings balance",
+  "app": {
+    "product": "atlas-console",
+    "variant": "base",
+    "version": "0.1"
+  },
+  "surface": {
+    "kind": "web-dom",
+    "entry": "http://localhost:4173/"
+  },
+  "inputs": [
+    {
+      "name": "memberId",
+      "type": "string",
+      "description": "The caller supplies this as `--memberId <value>`. Declared by the recorder from the run's own inputs; the review pass is where it earns a description of what the app expects."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "savingsBalance",
+      "type": "money",
+      "source": {
+        "kind": "extract",
+        "stepId": 3
+      },
+      "redact": false
+    }
+  ],
+  "success": {
+    "urlContains": "/search?memberId={memberId}"
+  },
+  "outcomes": [
+    {
+      "code": "NO_SUCH_ENTITY",
+      "detect": {
+        "kind": "text-on-page",
+        "pattern": "No member \\d{5} on file"
+      },
+      "message": "No member {memberId} on file"
+    },
+    {
+      "code": "RECORD_LOCKED",
+      "detect": {
+        "kind": "text-on-page",
+        "pattern": "Member \\d{5} is locked"
+      },
+      "message": "Member {memberId} is locked"
+    },
+    {
+      "code": "PERMISSION_DENIED",
+      "detect": {
+        "kind": "text-on-page",
+        "pattern": "Access to member \\d{5} is restricted"
+      },
+      "message": "Access to member {memberId} is restricted"
+    }
+  ],
+  "steps": [
+    {
+      "id": 1,
+      "kind": "act",
+      "action": "type",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "role",
+            "role": "textbox",
+            "name": "Member ID"
+          },
+          {
+            "strategy": "css",
+            "selector": "input[name=\"memberId\"]",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "value": "{memberId}",
+      "expect": {
+        "textEquals": {
+          "target": {
+            "candidates": [
+              {
+                "strategy": "role",
+                "role": "textbox",
+                "name": "Member ID"
+              },
+              {
+                "strategy": "css",
+                "selector": "input[name=\"memberId\"]",
+                "index": 0
+              }
+            ],
+            "framePath": []
+          },
+          "value": "{memberId}"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "act",
+      "action": "click",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "role",
+            "role": "button",
+            "name": "Search"
+          },
+          {
+            "strategy": "css",
+            "selector": "button",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "expect": {
+        "urlContains": "/search?memberId={memberId}"
+      }
+    },
+    {
+      "id": 3,
+      "kind": "extract",
+      "name": "savingsBalance",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "text",
+            "text": "$4,201.55"
+          },
+          {
+            "strategy": "row-relative",
+            "row": {
+              "by": "cell-text",
+              "text": "SAV"
+            },
+            "column": {
+              "by": "header-text",
+              "text": "Balance"
+            },
+            "action": "cell"
+          },
+          {
+            "strategy": "css",
+            "selector": "td",
+            "index": 11
+          }
+        ],
+        "framePath": []
+      },
+      "as": "table-cell"
+    }
+  ],
+  "risk": {
+    "class": "safe",
+    "irreversibleSteps": []
+  },
+  "provenance": {
+    "recordedAt": "2026-09-15T11:21:03.943Z",
+    "model": "gpt-5.4-mini",
+    "discoveryRunId": "2026-09-15T11-20-56-946Z",
+    "reviewedBy": "human"
+  }
+}

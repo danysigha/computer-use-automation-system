@@ -1,0 +1,29 @@
+{
+  "runId": "2026-09-15T11-20-56-946Z",
+  "goal": "Look up member 12345 and read their current savings balance",
+  "params": [
+    {
+      "name": "memberId",
+      "value": "12345"
+    }
+  ],
+  "entry": "http://localhost:4173/",
+  "model": "gpt-5.4-mini",
+  "identity": {
+    "product": "atlas-console",
+    "variant": "base",
+    "version": "0.1"
+  },
+  "ended": "completed",
+  "turns": 4,
+  "result": {
+    "status": "success",
+    "outputs": {
+      "savings balance": "$4,201.55"
+    },
+    "evidence": {
+      "runDir": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-15T11-20-56-946Z",
+      "runLog": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-15T11-20-56-946Z/run.jsonl"
+    }
+  }
+}

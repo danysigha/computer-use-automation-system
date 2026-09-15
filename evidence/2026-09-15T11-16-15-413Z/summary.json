@@ -1,0 +1,32 @@
+{
+  "runId": "2026-09-15T11-16-15-413Z",
+  "goal": "Look up member 12345 and read their current savings balance",
+  "params": [
+    {
+      "name": "memberId",
+      "value": "12345"
+    }
+  ],
+  "entry": "http://localhost:4173/",
+  "model": "gpt-5.4-mini",
+  "identity": {
+    "product": "atlas-console",
+    "variant": "base",
+    "version": "0.1"
+  },
+  "ended": "completed",
+  "turns": 4,
+  "result": {
+    "status": "failure",
+    "stage": "discovery",
+    "errorCode": "DISCOVERY_FAILED",
+    "expected": "the run's trace records as a capability and the store accepts it",
+    "observed": "the recording for \"member-savings-balance\" is invalid:\n2 problems:\n  · outputs.0.name — must be a name usable as a {placeholder}\n  · steps.2.name — must be a name usable as a {placeholder}",
+    "hint": "the run ended on an exception rather than an outcome — that is a bug in the harness rather than in the goal; read the last line of the run log for the message, and re-run once the cause is fixed",
+    "evidence": {
+      "runDir": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-15T11-16-15-413Z",
+      "runLog": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-15T11-16-15-413Z/run.jsonl"
+    },
+    "escalation": "none"
+  }
+}

@@ -63,6 +63,19 @@ export function placeholdersIn(value: string): readonly string[] {
 }
 
 /**
+ * Could this string be a declared name — a `Param.name`, an `Output.name`, an extract step's name,
+ * a capability id?
+ *
+ * Exported because the CLI has to answer that question *before* a run: `discover --param 2fast=x`
+ * is a usage error (§5.4's hard boundary), and the alternative to asking here is a run that spends a
+ * model's time and then fails validation on a name the caller could have been told about at once.
+ * One predicate, so the answer at the flag and the answer in the schema cannot diverge.
+ */
+export function isUsableName(name: string): boolean {
+  return NAME_PATTERN.test(name);
+}
+
+/**
  * `urlMatches` syntax (§4.1, §28): two variable syntaxes, one meaning each — `{param}`
  * interpolates the caller's declared input, `:name` matches any single non-empty segment.
  *

@@ -153,10 +153,37 @@ export interface ExecutedAction {
 /**
  * A capture either happened or it was suppressed, and the caller has to be able to tell which: a
  * caller that treats a suppressed screenshot as a path will render a file that is not there.
+ *
+ * `data` is present only when the caller asked for it, because the two consumers want different
+ * things from the same capture: evidence wants a file a human will open, and the discovery agent
+ * wants bytes to send to a model without a round trip through the filesystem. Both read the *same*
+ * pixels — one capture, two readers — which is what keeps the image the model reasoned about and the
+ * image in the run's evidence from being two different moments of a page that was still moving.
  */
 export type ScreenshotResult =
-  | { readonly kind: "captured"; readonly path: string }
+  | {
+      readonly kind: "captured";
+      readonly path: string;
+      readonly mediaType: string;
+      readonly data?: string;
+    }
   | { readonly kind: "suppressed"; readonly reason: string; readonly fields: readonly string[] };
+
+/**
+ * How to encode a capture. PNG by default (lossless, what a human reviewing evidence wants);
+ * the discovery loop asks for JPEG, where the trade is deliberate and paid for in §9's context.
+ */
+export interface ScreenshotEncoding {
+  readonly type: "png" | "jpeg";
+  readonly quality?: number;
+}
+
+export interface ScreenshotOptions {
+  readonly encoding?: ScreenshotEncoding;
+  /** Include the base64 bytes in the result. Skipped by default: a 150 KB PNG read back into
+   *  memory for a caller that only wants the path is work nobody asked for. */
+  readonly withData?: boolean;
+}
 
 export class SessionDriver {
   readonly #browser: Browser;
@@ -399,7 +426,7 @@ export class SessionDriver {
    * why the suppression clears itself: once the human (or the next step) clears the field, evidence
    * screenshots work again, and the run's log says exactly which of the two happened.
    */
-  async screenshot(label: string): Promise<ScreenshotResult> {
+  async screenshot(label: string, options: ScreenshotOptions = {}): Promise<ScreenshotResult> {
     const live = await this.#liveSensitiveFields();
     if (live.length > 0) {
       const reason =
@@ -409,13 +436,28 @@ export class SessionDriver {
       return { kind: "suppressed", reason, fields: live };
     }
 
+    const encoding = options.encoding ?? { type: "png" as const };
+    const mediaType = encoding.type === "png" ? "image/png" : "image/jpeg";
     const dir = join(this.#evidenceDir, "screenshots");
     await mkdir(dir, { recursive: true });
     this.#screenshotCount += 1;
-    const path = join(dir, `${String(this.#screenshotCount).padStart(2, "0")}-${slug(label)}.png`);
-    await this.#page.screenshot({ path, fullPage: false });
-    await this.#evidence.write({ kind: "note", subject: "screenshot", label, path });
-    return { kind: "captured", path };
+    const path = join(
+      dir,
+      `${String(this.#screenshotCount).padStart(2, "0")}-${slug(label)}.${encoding.type === "png" ? "png" : "jpg"}`,
+    );
+    // One call to the page's capture, and both readers come off it. A second capture would be a
+    // second moment: the image the model reasoned about would be a different frame from the one in
+    // evidence, and a reviewer comparing them would be comparing two pages.
+    const shot = await this.#page.screenshot({
+      path,
+      type: encoding.type,
+      fullPage: false,
+      ...(encoding.quality === undefined ? {} : { quality: encoding.quality }),
+    });
+    await this.#evidence.write({ kind: "note", subject: "screenshot", label, path, mediaType });
+    return options.withData === true
+      ? { kind: "captured", path, mediaType, data: shot.toString("base64") }
+      : { kind: "captured", path, mediaType };
   }
 
   /** Serialize the live DOM into evidence, scrubbed as text. The other half of §6's sink list. */

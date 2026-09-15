@@ -30,6 +30,16 @@
  *    slower CI box tunes without editing a tracked file (§5.1). Arrays (`backoffMs`) are file-only:
  *    a comma-separated list in an env var is a format nobody validates, and P5's shrunk-timing
  *    tests use a policy *file* (`--policy`) rather than env for the same reason.
+ *
+ * 4. **This file is the deployment's knowledge about the target app, not only its guardrails.** The
+ *    `outcomes` section is the app's *failure vocabulary* — the messages it renders when a lookup
+ *    finds nothing, a record is locked, access is refused — and it is here because no run can
+ *    witness those: a discovery run that succeeds never sees a failure page, so the signatures can
+ *    only come from someone who knows the app. §4.1 puts them at "the same seam as
+ *    `recoverableDialogs` in policy", and the seam is this: one checked-in file, parsed and validated
+ *    at boot under the fail-closed rule above, that a human edits to point the system at an app. The
+ *    review pass (`src/agent/review.ts`) is the reader — it turns a seed into an artifact's
+ *    `outcomes[]`. Nothing here *enforces* anything, and nothing here is read at replay time.
  */
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -122,6 +132,44 @@ const recoverableDialogSchema = z.strictObject({
 });
 
 /**
+ * A curated business-outcome signature (§4.1) — see decision 4 in the file header for why it is
+ * here rather than in a file of its own.
+ *
+ * Four fields, and three of them are checks on the fourth. `sample` is the app's real message,
+ * written out: it is the §10 pin, and the reason a signature cannot be curated against a message the
+ * app does not render. `pattern` has to match it (below), which turns "the shipped signatures are
+ * anchored to renderable text" from a claim in REPORT into something the loader refuses to accept
+ * otherwise. `message` is the caller-facing sentence, so it may interpolate `{param}`; `pattern` may
+ * not — it is matched against rendered page text, where the member id appears as itself, which is
+ * what `\d{5}` is for and why §4.1 rule 2 calls these whole-message patterns.
+ */
+const outcomeSeedSchema = z
+  .strictObject({
+    code: z.string().regex(/^[A-Z][A-Z0-9_]*$/, 'must be SCREAMING_SNAKE_CASE (e.g. "NO_SUCH_ENTITY")'),
+    message: z.string().min(1),
+    sample: z.string().min(1),
+    pattern: z
+      .string()
+      .min(1)
+      .refine(compilesAsRegex, { message: "must be a valid regular expression" })
+      .refine((pattern) => !compilesAsRegex(pattern) || !new RegExp(pattern).test(""), {
+        message:
+          "matches the empty string, so it would fire on any page — anchor it to the app's real " +
+          "message (the shipped signatures are whole-message patterns, never broad substrings)",
+      }),
+  })
+  // Checks that need both fields. The `compilesAsRegex` guard is load-bearing rather than
+  // belt-and-braces, for the reason `artifact.ts`'s own signature rule gives: zod runs every
+  // refinement even after one has failed, so without it a malformed pattern would be *compiled* here
+  // and throw a SyntaxError out of policy loading instead of being reported as the regex error it is.
+  .refine((seed) => !compilesAsRegex(seed.pattern) || new RegExp(seed.pattern).test(seed.sample), {
+    path: ["pattern"],
+    message:
+      "does not match `sample` — a signature that cannot fire on the app's own message detects " +
+      "nothing, and ships as a code that can never be returned",
+  });
+
+/**
  * The document. Strict throughout, for the reason `artifact.ts` gives: an unrecognized key is a
  * typo'd guardrail (`denyRoute` for `denyRoutes`), and silently ignoring it means the operator
  * believes something is being enforced that is not.
@@ -132,6 +180,7 @@ export const policyDocumentSchema = z
     risk: z.strictObject({ approvalRequired: z.array(riskRuleSchema) }),
     redact: redactSchema,
     recoverableDialogs: z.array(recoverableDialogSchema),
+    outcomes: z.array(outcomeSeedSchema),
     timing: timingSchema,
     agent: agentSchema,
   })
@@ -147,6 +196,7 @@ export type PolicyDocument = z.infer<typeof policyDocumentSchema>;
 export type RiskRule = z.infer<typeof riskRuleSchema>;
 export type AllowRoute = z.infer<typeof allowRouteSchema>;
 export type RecoverableDialog = z.infer<typeof recoverableDialogSchema>;
+export type OutcomeSeed = z.infer<typeof outcomeSeedSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Errors                                                                      */
@@ -184,6 +234,7 @@ function codeDefaultDocument(): PolicyDocument {
     risk: { approvalRequired: [] },
     redact: { fieldPatterns: [], outputIds: [] },
     recoverableDialogs: [],
+    outcomes: [],
     timing: { ...DEFAULT_TIMING, backoffMs: [...DEFAULT_TIMING.backoffMs] },
     agent: { ...DEFAULT_AGENT },
   };
@@ -220,6 +271,7 @@ function mergeDocument(...partials: readonly unknown[]): PolicyDocument {
     risk: sections("risk"),
     redact: sections("redact"),
     recoverableDialogs: sections("recoverableDialogs"),
+    outcomes: sections("outcomes"),
     timing: sections("timing"),
     agent: sections("agent"),
   };
@@ -303,6 +355,7 @@ export interface PolicyOverrides {
   readonly timing?: Partial<PolicyDocument["timing"]>;
   readonly agent?: Partial<PolicyDocument["agent"]>;
   readonly recoverableDialogs?: PolicyDocument["recoverableDialogs"];
+  readonly outcomes?: PolicyDocument["outcomes"];
 }
 
 export interface PolicySources {

@@ -104,6 +104,67 @@ describe("loading the shipped policy", () => {
   });
 });
 
+/**
+ * The curated failure vocabulary (§4.1, §10 G1/G2) — the section no run can produce.
+ *
+ * These are loader rules rather than review rules, and the division is deliberate: a signature that
+ * cannot fire, or one anchored to a message the app does not render, is a mistake in the *policy
+ * file*, and §6's posture is that a mistake there stops the process at boot rather than becoming a
+ * capability that looks fine and returns a code it can never return.
+ */
+describe("outcome seeds", () => {
+  /** The shipped file's own seeds, so the three §10 G1/G2 anchors are checked where they live. */
+  it("ships one signature per pinned fixture message, each matching its own sample", async () => {
+    const { document } = await shipped();
+    expect(document.outcomes.map((seed) => seed.code)).toEqual([
+      "NO_SUCH_ENTITY",
+      "RECORD_LOCKED",
+      "PERMISSION_DENIED",
+    ]);
+    for (const seed of document.outcomes) {
+      expect(new RegExp(seed.pattern).test(seed.sample)).toBe(true);
+    }
+    // The §10 G1/G2 pin, as data: the fixture's `stateMessage()` renders exactly these. A change to
+    // either side that the other did not follow is the fiction this section exists to prevent.
+    expect(document.outcomes.map((seed) => seed.sample)).toEqual([
+      "No member 99999 on file",
+      "Member 12345 is locked",
+      "Access to member 12345 is restricted",
+    ]);
+  });
+
+  it("rejects a signature that cannot fire on the message it claims to detect", async () => {
+    const file = await tempPolicy({
+      outcomes: [
+        { code: "RECORD_LOCKED", message: "locked", sample: "Member 12345 is locked", pattern: "Member \\d{6} is locked" },
+      ],
+    });
+    const error = await Policy.load({ file, env: {} }).catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(PolicyInvalidError);
+    expect((error as PolicyInvalidError).issues[0]?.path).toBe("outcomes.0.pattern");
+    expect((error as PolicyInvalidError).message).toContain("does not match `sample`");
+  });
+
+  it("rejects a vacuous signature, at the seed's own path rather than the artifact's", async () => {
+    const file = await tempPolicy({
+      outcomes: [{ code: "UNEXPECTED_STATE", message: "m", sample: "anything", pattern: "locked|" }],
+    });
+    const error = await Policy.load({ file, env: {} }).catch((thrown: unknown) => thrown);
+    expect((error as PolicyInvalidError).issues[0]?.path).toBe("outcomes.0.pattern");
+    expect((error as PolicyInvalidError).message).toContain("matches the empty string");
+  });
+
+  it("reports a malformed pattern as a regex error rather than throwing out of the loader", async () => {
+    // The redundant-looking `compilesAsRegex` guard: zod runs the sample-match refinement too, so a
+    // pattern that does not compile would be compiled there and raise a SyntaxError instead.
+    const file = await tempPolicy({
+      outcomes: [{ code: "X", message: "m", sample: "s", pattern: "Member [" }],
+    });
+    const error = await Policy.load({ file, env: {} }).catch((thrown: unknown) => thrown);
+    expect((error as PolicyInvalidError).message).toContain("valid regular expression");
+  });
+});
+
 describe("precedence: code default < policy.json < env < explicit override", () => {
   it("fills a section the file omits from the code defaults", async () => {
     const file = await tempPolicy({ timing: { waitForMs: 5_000 } });
