@@ -1,0 +1,345 @@
+{
+  "schemaVersion": "1.0",
+  "id": "sub-account-open",
+  "name": "Open a new sub-account for member 12345 and reach the confirmation scr…",
+  "description": "Open a new sub-account for member 12345 and reach the confirmation screen",
+  "app": {
+    "product": "atlas-console",
+    "variant": "base",
+    "version": "0.1"
+  },
+  "surface": {
+    "kind": "web-dom",
+    "entry": "http://localhost:4173/"
+  },
+  "inputs": [
+    {
+      "name": "memberId",
+      "type": "string",
+      "description": "The caller supplies this as `--memberId <value>`. Declared by the recorder from the run's own inputs; the review pass is where it earns a description of what the app expects."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "confirmation",
+      "type": "string",
+      "source": {
+        "kind": "extract",
+        "stepId": 8
+      },
+      "redact": false
+    }
+  ],
+  "success": {
+    "urlMatches": "/member/:id/subaccount/done"
+  },
+  "outcomes": [
+    {
+      "code": "NO_SUCH_ENTITY",
+      "detect": {
+        "kind": "text-on-page",
+        "pattern": "No member \\d{5} on file"
+      },
+      "message": "No member {memberId} on file"
+    },
+    {
+      "code": "RECORD_LOCKED",
+      "detect": {
+        "kind": "text-on-page",
+        "pattern": "Member \\d{5} is locked"
+      },
+      "message": "Member {memberId} is locked"
+    },
+    {
+      "code": "PERMISSION_DENIED",
+      "detect": {
+        "kind": "text-on-page",
+        "pattern": "Access to member \\d{5} is restricted"
+      },
+      "message": "Access to member {memberId} is restricted"
+    }
+  ],
+  "steps": [
+    {
+      "id": 1,
+      "kind": "act",
+      "action": "type",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "role",
+            "role": "textbox",
+            "name": "Member ID"
+          },
+          {
+            "strategy": "css",
+            "selector": "input[name=\"memberId\"]",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "value": "{memberId}",
+      "expect": {
+        "textEquals": {
+          "target": {
+            "candidates": [
+              {
+                "strategy": "role",
+                "role": "textbox",
+                "name": "Member ID"
+              },
+              {
+                "strategy": "css",
+                "selector": "input[name=\"memberId\"]",
+                "index": 0
+              }
+            ],
+            "framePath": []
+          },
+          "value": "{memberId}"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "act",
+      "action": "click",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "role",
+            "role": "button",
+            "name": "Search"
+          },
+          {
+            "strategy": "css",
+            "selector": "button",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "expect": {
+        "urlContains": "/search?memberId={memberId}"
+      }
+    },
+    {
+      "id": 3,
+      "kind": "act",
+      "action": "click",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "row-relative",
+            "row": {
+              "by": "cell-text",
+              "text": "SAV"
+            },
+            "column": {
+              "by": "header-text",
+              "text": "Actions"
+            },
+            "action": "link-in-row"
+          },
+          {
+            "strategy": "css",
+            "selector": "a",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "expect": {
+        "urlMatches": "/member/:id/summary"
+      }
+    },
+    {
+      "id": 4,
+      "kind": "act",
+      "action": "click",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "role",
+            "role": "link",
+            "name": "New sub-account"
+          },
+          {
+            "strategy": "text",
+            "text": "New sub-account"
+          },
+          {
+            "strategy": "css",
+            "selector": "a",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "expect": {
+        "urlMatches": "/member/:id/subaccount"
+      }
+    },
+    {
+      "id": 5,
+      "kind": "act",
+      "action": "type",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "role",
+            "role": "textbox",
+            "name": "Initial deposit"
+          },
+          {
+            "strategy": "css",
+            "selector": "input[name=\"deposit\"]",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "value": "100",
+      "expect": {
+        "textEquals": {
+          "target": {
+            "candidates": [
+              {
+                "strategy": "role",
+                "role": "textbox",
+                "name": "Initial deposit"
+              },
+              {
+                "strategy": "css",
+                "selector": "input[name=\"deposit\"]",
+                "index": 0
+              }
+            ],
+            "framePath": []
+          },
+          "value": "100"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "kind": "act",
+      "action": "click",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "role",
+            "role": "button",
+            "name": "Continue"
+          },
+          {
+            "strategy": "text",
+            "text": "Continue"
+          },
+          {
+            "strategy": "row-relative",
+            "row": {
+              "by": "cell-text",
+              "text": "Continue"
+            },
+            "column": {
+              "by": "header-text",
+              "text": "Sub-account type"
+            },
+            "action": "button-in-row"
+          },
+          {
+            "strategy": "css",
+            "selector": "button",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "expect": {
+        "elementExists": {
+          "candidates": [
+            {
+              "strategy": "role",
+              "role": "heading",
+              "name": "Confirm Sub-Account Activation"
+            },
+            {
+              "strategy": "text",
+              "text": "Confirm Sub-Account Activation"
+            },
+            {
+              "strategy": "css",
+              "selector": "h1",
+              "index": 0
+            }
+          ],
+          "framePath": []
+        }
+      }
+    },
+    {
+      "id": 7,
+      "kind": "act",
+      "action": "click",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "role",
+            "role": "button",
+            "name": "Confirm activation"
+          },
+          {
+            "strategy": "text",
+            "text": "Confirm activation"
+          },
+          {
+            "strategy": "css",
+            "selector": "button",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "expect": {
+        "urlMatches": "/member/:id/subaccount/done"
+      }
+    },
+    {
+      "id": 8,
+      "kind": "extract",
+      "name": "confirmation",
+      "target": {
+        "candidates": [
+          {
+            "strategy": "role",
+            "role": "heading",
+            "name": "Sub-Account Activated"
+          },
+          {
+            "strategy": "text",
+            "text": "Sub-Account Activated"
+          },
+          {
+            "strategy": "css",
+            "selector": "h1",
+            "index": 0
+          }
+        ],
+        "framePath": []
+      },
+      "as": "text"
+    }
+  ],
+  "risk": {
+    "class": "safe",
+    "irreversibleSteps": []
+  },
+  "provenance": {
+    "recordedAt": "2026-09-15T21:58:54.865Z",
+    "model": "gpt-5.4-mini",
+    "discoveryRunId": "2026-09-15T21-58-37-386Z",
+    "reviewedBy": "human"
+  }
+}
