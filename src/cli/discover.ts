@@ -36,10 +36,9 @@
  *    can never put a caller's value in a filename. The frozen grammar is a subset of what this
  *    accepts, which is the direction that cannot break a caller.
  */
-import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { agentConfig } from "../agent/config.ts";
 import { describeStuck } from "../agent/stuck.ts";
 import { runDiscovery, type DiscoveryRun } from "../agent/loop.ts";
@@ -60,7 +59,16 @@ import {
   type AppIdentity,
 } from "../surface/identity.ts";
 import { SessionDriver } from "../surface/session-driver.ts";
-import type { EvidenceLogger } from "../surface/evidence.ts";
+import {
+  PROCESS_STREAMS,
+  describeUsageError,
+  evidenceRoot,
+  loadDotenv,
+  noteWriter,
+  type NoteWriter,
+  type Streams,
+  type UsageError,
+} from "./io.ts";
 import { describePreflightFailure, preflight } from "./preflight.ts";
 import {
   describeResult,
@@ -71,8 +79,7 @@ import {
   type RunResult,
 } from "../replay/result.ts";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const EVIDENCE_ROOT = join(ROOT, "evidence");
+/* `<repo>/` and `<repo>/evidence` come from `io.ts`, so both commands write runs to one tree. */
 
 /**
  * §4.1's version for a fresh recording — `v1`, which is the path §11's P4 criterion names
@@ -103,12 +110,6 @@ export interface Args {
 }
 
 export type ParsedArgs = { readonly ok: true; readonly args: Args } | UsageError;
-
-export interface UsageError {
-  readonly ok: false;
-  readonly problem: string;
-  readonly fix: string;
-}
 
 /**
  * The frozen grammar, parsed by hand.
@@ -280,17 +281,6 @@ const STOP_WORDS: ReadonlySet<string> = new Set([
 /* The run                                                                     */
 /* -------------------------------------------------------------------------- */
 
-/** Where the CLI writes. Injected so a test can drive the command without capturing process streams. */
-export interface Streams {
-  readonly out: (text: string) => void;
-  readonly err: (text: string) => void;
-}
-
-const PROCESS_STREAMS: Streams = {
-  out: (text) => process.stdout.write(text),
-  err: (text) => process.stderr.write(text),
-};
-
 /**
  * `discover`, end to end. Returns the process exit code: `0` success, `1` a failed run, `2` a usage
  * or preflight error — §5.4's three, with the third decided before any of the first two can happen.
@@ -298,15 +288,14 @@ const PROCESS_STREAMS: Streams = {
 export async function runDiscover(argv: readonly string[], streams: Streams = PROCESS_STREAMS): Promise<number> {
   const parsed = parseArgs(argv);
   if (!parsed.ok) {
-    streams.err(`discover: ${parsed.problem}\n  fix: ${parsed.fix}\n`);
+    streams.err(describeUsageError("discover", parsed));
     return 2;
   }
   const { args } = parsed;
 
   // `.env` is loaded before preflight so the key check sees it — and before `new OpenAI()`, which
   // reads the same variable itself.
-  const dotenv = join(ROOT, ".env");
-  if (existsSync(dotenv)) process.loadEnvFile(dotenv);
+  loadDotenv();
 
   const pre = await preflight({ command: "discover", entry: args.entry, env: process.env });
   if (!pre.ok) {
@@ -319,7 +308,7 @@ export async function runDiscover(argv: readonly string[], streams: Streams = PR
   const redactor = redactorFor(policy);
 
   const runId = new Date().toISOString().replaceAll(/[:.]/g, "-");
-  const runDir = join(EVIDENCE_ROOT, runId);
+  const runDir = join(evidenceRoot(), runId);
 
   const driver = await SessionDriver.launch({
     headless: !args.headed,
@@ -511,30 +500,6 @@ export function failureFor(run: DiscoveryRun, evidence: EvidenceRefs): RunResult
 /* -------------------------------------------------------------------------- */
 /* Narration                                                                   */
 /* -------------------------------------------------------------------------- */
-
-interface NoteWriter {
-  /** Sync, because both callers are: the note is queued and written in order. */
-  readonly note: (line: string) => void;
-  readonly flush: () => Promise<void>;
-}
-
-/**
- * Narration to stderr, and to the run log — in the order it happened.
- *
- * The queue is the point: `EvidenceLogger.write` is async, both note sources are sync, and two
- * unawaited appends would make the log's line order a race. Reads as a chain rather than a buffer so
- * a long run streams rather than holding every line in memory.
- */
-function noteWriter(evidence: EvidenceLogger, streams: Streams): NoteWriter {
-  let queue: Promise<unknown> = Promise.resolve();
-  return {
-    note: (line) => {
-      streams.err(`  ${line}\n`);
-      queue = queue.then(() => evidence.write({ kind: "note", actor: "agent", message: line })).catch(() => undefined);
-    },
-    flush: () => queue.then(() => undefined),
-  };
-}
 
 /** A goal is a sentence; keep it to one line in a log even when it was pasted with newlines. */
 function describeGoal(goal: string): string {

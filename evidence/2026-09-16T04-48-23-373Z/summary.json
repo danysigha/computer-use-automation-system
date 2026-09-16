@@ -1,0 +1,41 @@
+{
+  "runId": "2026-09-16T04-48-23-373Z",
+  "capability": "member-savings-balance",
+  "version": "latest",
+  "inputs": {
+    "memberId": "12345"
+  },
+  "entry": "http://localhost:4173/",
+  "policy": "/Users/danysigha/Desktop/computer-use-automation-system/policy/policy.json",
+  "identity": {
+    "expected": {
+      "product": "atlas-console",
+      "variant": "base",
+      "version": "0.1"
+    },
+    "observed": {
+      "product": "atlas-console",
+      "variant": "base",
+      "version": "0.1"
+    },
+    "verdict": "match",
+    "reason": "the target advertises atlas-console/base@0.1, as recorded"
+  },
+  "risk": {
+    "declared": [],
+    "gated": [],
+    "upgraded": [],
+    "blocked": [],
+    "notes": []
+  },
+  "result": {
+    "status": "success",
+    "outputs": {
+      "savingsBalance": 4201.55
+    },
+    "evidence": {
+      "runDir": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-16T04-48-23-373Z",
+      "runLog": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-16T04-48-23-373Z/run.jsonl"
+    }
+  }
+}

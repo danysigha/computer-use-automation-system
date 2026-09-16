@@ -11,7 +11,8 @@
  *    proves at compile time that the schemas below accept exactly it
  *    (`schemaAgreesWithResolverTypes`, at the bottom) — a candidate this validator accepts is, by
  *    construction, one the resolver can execute. The runtime role list is the one thing that
- *    cannot be imported, and it carries its own exhaustiveness proof for the same reason.
+ *    could not be imported at first — it now is, from the same file, so there is no second list
+ *    left to drift.
  *
  * 2. **Shape lives here; rules that need the whole artifact live in `validate.ts`.** A rule that
  *    reads one field (a `pattern` must compile as a regex) belongs beside the field. A rule that
@@ -28,7 +29,7 @@
  * `schemaVersion`, which is what a genuine shape change is supposed to bump.
  */
 import { z } from "zod";
-import type { CandidateRole, TargetCandidate, TargetDescriptor } from "../surface/target.ts";
+import { CANDIDATE_ROLES, type CandidateRole, type TargetCandidate, type TargetDescriptor } from "../surface/target.ts";
 
 /** §4.1's `schemaVersion`. A shape change is a new value here, not a quiet addition below. */
 export const SCHEMA_VERSION = "1.0";
@@ -96,31 +97,11 @@ export function hasRouteVariable(pattern: string): boolean {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The roles a `role` candidate may name. `target.ts` owns the `CandidateRole` union, but a zod
- * enum needs the values at runtime, so the list has to be written out somewhere. The two checks
- * below are what stop it from becoming a second source of truth: `satisfies` proves every entry is
- * a real role, and the exhaustiveness alias proves no real role is missing.
+ * The roles a `role` candidate may name. Both halves live in `target.ts` — the union and this array
+ * — so a zod enum (which needs the values at runtime) has exactly one place to read them from. The
+ * exhaustiveness alias below is the converse of the `satisfies` check over there: between them, the
+ * array and the union are proven equal from both directions.
  */
-const CANDIDATE_ROLES = [
-  "button",
-  "link",
-  "textbox",
-  "searchbox",
-  "combobox",
-  "checkbox",
-  "radio",
-  "option",
-  "listbox",
-  "menuitem",
-  "tab",
-  "switch",
-  "spinbutton",
-  "cell",
-  "columnheader",
-  "rowheader",
-  "heading",
-] as const satisfies readonly CandidateRole[];
-
 const roleCandidateSchema = z.strictObject({
   strategy: z.literal("role"),
   role: z.enum(CANDIDATE_ROLES),

@@ -35,6 +35,43 @@ export type CandidateRole =
   | "rowheader"
   | "heading";
 
+/**
+ * The same union, at runtime — for code holding a *live* role string rather than a typed one.
+ *
+ * The union above stays written out by hand and this list is checked against it (`satisfies` here,
+ * and its converse in `schema/artifact.ts`, which builds its zod enum from this array). Two checks
+ * in opposite directions are what make one list safe to share; deriving the union from the array
+ * would make both vacuous and let a typo become a new role. The live-role caller is
+ * `session-driver.findDialog`, which reads a dialog control's computed role off the page and has to
+ * know whether the resolver can address it that way.
+ */
+export const CANDIDATE_ROLES = [
+  "button",
+  "link",
+  "textbox",
+  "searchbox",
+  "combobox",
+  "checkbox",
+  "radio",
+  "option",
+  "listbox",
+  "menuitem",
+  "tab",
+  "switch",
+  "spinbutton",
+  "cell",
+  "columnheader",
+  "rowheader",
+  "heading",
+] as const satisfies readonly CandidateRole[];
+
+const ROLE_SET: ReadonlySet<string> = new Set(CANDIDATE_ROLES);
+
+/** Is this live role string one a `role` candidate can name? Narrows, so callers need no cast. */
+export function isCandidateRole(role: string): role is CandidateRole {
+  return ROLE_SET.has(role);
+}
+
 export interface RoleCandidate {
   readonly strategy: "role";
   readonly role: CandidateRole;
@@ -145,6 +182,34 @@ export async function frameAt(page: Page, framePath: readonly number[] = []): Pr
 /** Trim + collapse whitespace. The pinned normalization (§4.1) and nothing more. */
 export function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * A page string, rendered for a message: quoted, with its line breaks made visible.
+ *
+ * It sits here next to `normalizeText` because both answer the same kind of question — what a
+ * string *looks like* when it leaves the browser and becomes a sentence in a run log — and both
+ * sides of the system need the same answer: the driver names the control it found, and the replay
+ * engine names the text it read. Putting it in the replay layer would make `surface/` import from
+ * `replay/`, which is backwards.
+ *
+ * Deliberately not `JSON.stringify`, which §6's one-serializer rule forbids outside the redactor
+ * (`tests/unit/serialization-sinks.test.ts` scans for the call, because a payload formatter nobody
+ * scrubs is how a page's text reaches a sink with a secret in it). The guard cannot tell a message
+ * from a payload, and that bluntness is worth more than the characters this saves — a helper that
+ * can only ever wrap one string can never grow into a sink.
+ *
+ * Line breaks matter more than escaping: an `observed` is one line in `run.jsonl`, so a page's text
+ * containing a newline would otherwise forge a line boundary in the log.
+ */
+export function quote(value: string): string {
+  const escaped = value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r")
+    .replaceAll("\t", "\\t");
+  return `"${escaped}"`;
 }
 
 /** Serialized to the page by `evaluateHandle`; must not close over anything in this file. */

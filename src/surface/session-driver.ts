@@ -30,6 +30,15 @@
  * There is deliberately no `goto`. Bootstrapping the entry URL is a navigation like any other and
  * goes through `execute`, which is what keeps the choke point total — a second door would be the
  * one an action eventually walks through.
+ *
+ * **The read half (P5).** Replay has to ask the page questions that are not actions — is it still
+ * loading, what does it say, is a password field on it, does this chain resolve — and the
+ * alternative to putting them here is the engine reaching into `#page` from outside, which is the
+ * seam this file exists to be. So the reads live here too, in one block below, and none of them
+ * acts: `execute` remains the only method that changes anything. They are deliberately **not**
+ * policy-checked, matching the observer's own snapshot reads (P4 reads through `snapshot()` for the
+ * same reason); `allowlist.actions` does name `read`/`extract`, and that entry is the seam a future
+ * gated-read path would consult — stated plainly rather than left as an implied guarantee.
  */
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -38,7 +47,16 @@ import { chromium, type Browser, type BrowserContext, type ElementHandle, type P
 import type { Redactor } from "../policy/redact.ts";
 import { EvidenceLogger, type EvidenceLine } from "./evidence.ts";
 import { Observer, type ObserverOptions, type RenderOptions, type Snapshot } from "./observer.ts";
-import { resolveTarget, type ResolvedTarget, type TargetDescriptor } from "./target.ts";
+import {
+  isCandidateRole,
+  isResolvable,
+  normalizeText,
+  quote,
+  resolveTarget,
+  type ResolvedTarget,
+  type TargetCandidate,
+  type TargetDescriptor,
+} from "./target.ts";
 
 export type SurfaceAction =
   | { readonly kind: "navigate"; readonly url: string }
@@ -185,6 +203,21 @@ export interface ScreenshotOptions {
   readonly withData?: boolean;
 }
 
+/**
+ * A dialog standing on the page, as `findDialog` reports it.
+ *
+ * `text` is what policy's `recoverableDialogs` are matched against. `control` is a descriptor the
+ * caller can hand straight back to `execute` — or `null` when the dialog carries nothing the
+ * resolver can address, which is a fact the caller has to act on (escalate) rather than a detail it
+ * can ignore.
+ */
+export interface DialogObservation {
+  readonly text: string;
+  readonly control: TargetDescriptor | null;
+  /** How the control was addressed, for the run log. */
+  readonly via: string;
+}
+
 export class SessionDriver {
   readonly #browser: Browser;
   readonly #context: BrowserContext;
@@ -195,6 +228,12 @@ export class SessionDriver {
   readonly #evidence: EvidenceLogger;
   readonly #approval: ApprovalHandler | undefined;
   readonly #evidenceDir: string;
+  /** See `lastDocumentStatus`. A box rather than a field because the listener owns the writing. */
+  readonly #documentStatus: { value: number | null };
+  /** See `lastNavigationFailure`, and the box's own note above. */
+  readonly #documentFailure: { value: string | null };
+  /** See `#withinBudget`. The same number the actions use, because it is the same budget. */
+  readonly #readBudgetMs: number;
   #screenshotCount = 0;
 
   private constructor(
@@ -204,12 +243,17 @@ export class SessionDriver {
     options: SessionOptions,
     evidenceDir: string,
     evidence: EvidenceLogger,
+    documentStatus: { value: number | null },
+    documentFailure: { value: string | null },
   ) {
     this.#browser = browser;
     this.#context = context;
     this.#page = page;
     this.#evidenceDir = evidenceDir;
     this.#evidence = evidence;
+    this.#documentStatus = documentStatus;
+    this.#documentFailure = documentFailure;
+    this.#readBudgetMs = options.actionTimeoutMs ?? DEFAULT_READ_BUDGET_MS;
     this.#observer = new Observer(page, options.observer ?? {});
     this.#policy = options.policy;
     this.#redactor = options.redactor;
@@ -224,9 +268,32 @@ export class SessionDriver {
     const page = await context.newPage();
     if (options.actionTimeoutMs !== undefined) page.setDefaultTimeout(options.actionTimeoutMs);
 
+    // The main document's HTTP status, kept for the engine's classifier (§5.2: "the app responded
+    // but unusably"). Only the **main frame's** document responses count: a subresource or an
+    // iframe's own document answering 500 is not the page failing to render, and counting those
+    // would let an unrelated frame misclassify the step in flight.
+    const documentStatus: { value: number | null } = { value: null };
+    page.on("response", (response) => {
+      if (response.request().resourceType() !== "document") return;
+      if (response.frame() !== page.mainFrame()) return;
+      documentStatus.value = response.status();
+    });
+
+    // The other half of the same fact, and the one a URL cannot tell you: a navigation that *failed*
+    // still moves the address (Chromium keeps the requested URL on the page it shows instead), so
+    // "the browser left the old URL" is not the same question as "a document arrived" (§5.2's
+    // transport failure). Cleared when a navigation is issued — see `execute` — so it always
+    // describes the most recent one rather than any that ever failed.
+    const documentFailure: { value: string | null } = { value: null };
+    page.on("requestfailed", (request) => {
+      if (request.resourceType() !== "document") return;
+      if (request.frame() !== page.mainFrame()) return;
+      documentFailure.value = request.failure()?.errorText ?? "the request failed";
+    });
+
     const evidenceDir = resolve(options.evidenceDir ?? (await mkdtemp(join(tmpdir(), "atlas-session-"))));
     const evidence = options.evidence ?? (await EvidenceLogger.open(evidenceDir, options.redactor));
-    return new SessionDriver(browser, context, page, options, evidenceDir, evidence);
+    return new SessionDriver(browser, context, page, options, evidenceDir, evidence, documentStatus, documentFailure);
   }
 
   get page(): Page {
@@ -287,6 +354,11 @@ export class SessionDriver {
       const context: ActionContext = { action, targetName: null, targetRole: null };
       const verdict = await this.#policy.review(context);
       const approval = await this.#permit(verdict, context);
+      // Cleared here, because both facts describe *this* navigation: a status or a failure from an
+      // earlier one would otherwise outlive the page it happened on and be read against a navigation
+      // that is still in flight (see `lastNavigationFailure`).
+      this.#documentStatus.value = null;
+      this.#documentFailure.value = null;
       await this.#page.goto(action.url, { waitUntil: "load" });
       return this.#record({ action, verdict, approval, sensitive: false });
     }
@@ -499,10 +571,229 @@ export class SessionDriver {
     return names;
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* The read half — questions, never actions                                  */
+  /* ------------------------------------------------------------------------ */
+
+  /**
+   * Ask a question, and answer `unanswered` if the page takes longer than the budget to respond.
+   *
+   * Every read below needs this, and the reason is not tidiness. `frame.evaluate` cannot be given a
+   * timeout, and it does not obey Playwright's default one either: **on a frame whose navigation is
+   * still outstanding it waits for the new execution context**, so it blocks until the app finally
+   * answers — measured at 11.8s while the default timeout stood at 200ms, in the probe that found
+   * this. That turns replay's step budget into a fiction. §22's pinned terminal is "the budget ran
+   * out → `failure` under the detected condition", and a read that outlives the deadline converts
+   * that into "the app eventually answered": the poll's clock is only real if every question in it
+   * returns, so each one is raced against the budget and gives up.
+   *
+   * Giving up is not a new verdict — it is the "no answer" each caller already documents: a frame
+   * mid-navigation counts as settled (see `isSettled`), an unreadable page has no text, no dialog
+   * and no password field. What changes is that the poll can now act on those facts *within its
+   * budget* instead of after the app decides to speak.
+   *
+   * The abandoned evaluation is left to settle on its own; it has a `catch`, so nothing is
+   * unhandled, and it resolves at the latest when the navigation it was waiting on commits.
+   */
+  async #withinBudget<T>(question: () => Promise<T>, unanswered: T): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<T>((resolve) => {
+      timer = setTimeout(() => resolve(unanswered), this.#readBudgetMs);
+    });
+    try {
+      return await Promise.race([question().catch(() => unanswered), expired]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Whether every visible document has finished loading (`readyState === "complete"`).
+   *
+   * All frames, because the choke point's own frame rules are: a page is not settled while a frame
+   * it needs is still arriving. Frames that cannot be evaluated (cross-origin, mid-navigation)
+   * count as settled — the alternative is a check that never returns true on a page carrying an
+   * unreadable frame, which would turn a working app into a permanent `SLOW_LOAD`. Mid-navigation
+   * is where that matters: the previous document is complete and the new one has not arrived, so
+   * "settled" is exactly the state §22 calls `navigationPending`, and the poll reads it off the
+   * step's own expectation rather than off this answer (see the engine's `checkExpectation`).
+   */
+  async isSettled(): Promise<boolean> {
+    return this.#withinBudget(async () => {
+      for (const frame of this.#page.frames()) {
+        const state = await frame.evaluate(() => document.readyState).catch(() => "complete");
+        if (state !== "complete") return false;
+      }
+      return true;
+    }, true);
+  }
+
+  /**
+   * The text a person would read off the page, normalized, frames included — the string §4.1's
+   * outcome signatures are matched against.
+   *
+   * `innerText`, not `textContent`: a signature is a claim about what the app *shows*, and the
+   * fixture's build marker is `hidden` precisely so that the two are different questions.
+   */
+  async visibleText(): Promise<string> {
+    return this.#withinBudget(async () => {
+      const parts: string[] = [];
+      for (const frame of this.#page.frames()) {
+        const text = await frame.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+        if (text !== "") parts.push(text);
+      }
+      return normalizeText(parts.join("\n"));
+    }, "");
+  }
+
+  /**
+   * Is a password field on the page? §5.2's signature for a login screen appearing mid-flow
+   * (`SESSION_EXPIRED`) — and the one signal that needs no route knowledge, so a session that
+   * expires onto a differently-spelled login page is still caught.
+   */
+  async hasPasswordField(): Promise<boolean> {
+    return this.#withinBudget(async () => {
+      for (const frame of this.#page.frames()) {
+        const found = await frame
+          .evaluate(() => document.querySelector('input[type="password"]') !== null)
+          .catch(() => false);
+        if (found) return true;
+      }
+      return false;
+    }, false);
+  }
+
+  /**
+   * The HTTP status of the main document's most recent response, or `null` before the first one.
+   *
+   * Read by replay's classifier for `TRANSIENT_ERROR` (§5.2: "the app responded but unusably").
+   * It is the *response*, not an exception, which is the distinction §5.2 draws between a 5xx and a
+   * transport failure — so it arrives as a fact about the last navigation rather than as a throw.
+   * No budget here: it is a field the response listener wrote, not a question asked of the page.
+   */
+  lastDocumentStatus(): number | null {
+    return this.#documentStatus.value;
+  }
+
+  /**
+   * The browser's own words for why the most recent navigation delivered no document, or `null` when
+   * it did (or when none was issued).
+   *
+   * A navigation that fails is not a navigation that did not happen: Chromium shows an error page
+   * *at the requested URL*, so `page.url()` has moved and the step's own `navigated` check would
+   * report the step as having arrived. That misreading is what this answers — §5.2 files the failure
+   * as `TRANSPORT_ERROR` (recoverable, "the next attempt is a fresh question") rather than letting a
+   * run walk onto an error page and fail later on whatever it looks for first. The text is
+   * Playwright's (`net::ERR_CONNECTION_REFUSED` and friends), because `observed` is more useful
+   * carrying it than carrying a paraphrase.
+   */
+  lastNavigationFailure(): string | null {
+    return this.#documentFailure.value;
+  }
+
+  /** Does this chain resolve to exactly one node right now? Backs `elementExists`/`elementAbsent`. */
+  async resolves(descriptor: TargetDescriptor): Promise<boolean> {
+    // Bounded for the same reason as the reads above — resolution is a question too, and a locator
+    // query against a page mid-navigation waits with it. "Cannot confirm it resolves" is already
+    // this predicate's false branch, which is what makes `elementAbsent` on a page that is still
+    // answering a *retryable* state rather than a settled absence.
+    return this.#withinBudget(() => isResolvable(this.#page, descriptor), false);
+  }
+
+  /**
+   * A modal dialog standing on the page, its own text, and the control that answers it.
+   *
+   * §5.2's `INTERSTITIAL_DIALOG` is detected here rather than by an artifact target, because a
+   * dialog is by definition the thing nothing recorded: the artifact has no candidate chain for it,
+   * and it must not need one. So the *page* is asked what it is showing, and the answer comes back
+   * in the two halves the caller needs — the text policy matches on, and a descriptor built from
+   * the control's **live** accessible role and name.
+   *
+   * That last part is the design: the control is described as an ordinary role candidate, so
+   * answering the dialog goes through `execute` like every other action — resolved, policy-reviewed,
+   * recorded. A driver that clicked the node directly would be the second door this file exists to
+   * close, and a dialog would be the one action in the system that no policy saw.
+   *
+   * `control` is null when the dialog carries nothing addressable (a `role="dialog"` of prose, or a
+   * control whose role is not one the resolver names). The caller's move is then to escalate, which
+   * is right: a dialog we cannot operate is a dialog a human has to.
+   */
+  async findDialog(): Promise<DialogObservation | null> {
+    return this.#withinBudget(async () => {
+      for (const frame of this.#page.frames()) {
+        const found = await frame.evaluate((): RawDialog | null => {
+          const dialog = document.querySelector('[role="dialog"], [aria-modal="true"], dialog[open]');
+          if (dialog === null) return null;
+          const text = ((dialog as HTMLElement).innerText ?? dialog.textContent ?? "").replace(/\s+/g, " ").trim();
+
+          const control = dialog.querySelector(
+            'button, a[href], input[type=submit], input[type=button], [role="button"], [role="link"]',
+          );
+          if (control === null) return { text, role: null, name: null };
+          // The *live* role and name, computed the way the accessibility tree computes them, because
+          // those are the two things `getByRole` will match on. Reading them from the markup's
+          // intention instead — "it's a `<button>`, so it's a button" — is how an `<a>` with no href
+          // (not a link) or an `input[type=submit]` named by its `value` (which has no text content
+          // at all) become descriptors that resolve to nothing or to everything.
+          const tag = control.tagName.toLowerCase();
+          const explicit = control.getAttribute("role");
+          const role = explicit ?? (tag === "a" ? "link" : tag === "input" ? "button" : tag);
+          const name =
+            control.getAttribute("aria-label") ??
+            control.getAttribute("title") ??
+            (tag === "input" ? control.getAttribute("value") : null) ??
+            (control as HTMLElement).innerText ??
+            control.textContent ??
+            "";
+          return { text, role, name: name.replace(/\s+/g, " ").trim() };
+        }).catch(() => null);
+
+        if (found === null) continue;
+        return { text: found.text, ...describeControl(found) };
+      }
+      return null;
+    }, null);
+  }
+
+  /**
+   * Resolve a target and read what it shows, without acting on it — the extract step's whole job.
+   *
+   * A target read through the **same resolver** the action path uses, which is the property that
+   * matters: an extractor that resolved by its own rules could point at a different element than
+   * the step that clicked there, and the artifact's candidate chain would mean two things.
+   */
+  async read(descriptor: TargetDescriptor): Promise<{ readonly text: string; readonly candidate: TargetCandidate }> {
+    const resolved = await resolveTarget(this.#page, descriptor);
+    try {
+      return { text: await readElementText(resolved.element), candidate: resolved.candidate };
+    } finally {
+      await resolved.element.dispose();
+    }
+  }
+
   async close(): Promise<void> {
     await this.#context.close();
     await this.#browser.close();
   }
+}
+
+/**
+ * What an element shows, as text: a form control's current **value**, otherwise its text content.
+ *
+ * One function, because the expectation and the extraction have to agree: §4.1's recorded
+ * `textEquals` for a typed field is the value the recorder saw in the snapshot, whose own rule is
+ * "static text, or a form control's current value". A `select` reports its selected option's label
+ * rather than its value attribute, which is what an accessibility tree calls that control's value.
+ */
+export async function readElementText(element: ElementHandle<Element>): Promise<string> {
+  const text = await element.evaluate((node) => {
+    if (node instanceof HTMLSelectElement) {
+      return node.selectedOptions[0]?.textContent ?? node.value;
+    }
+    if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) return node.value;
+    return node.textContent ?? "";
+  });
+  return normalizeText(text);
 }
 
 /**
@@ -527,11 +818,52 @@ function describeAction(action: SurfaceAction): string {
   }
 }
 
+/** What the page hands back from `findDialog`'s scan. Plain data: it crosses the process boundary. */
+interface RawDialog {
+  readonly text: string;
+  readonly role: string | null;
+  readonly name: string | null;
+}
+
+/**
+ * A raw dialog's control as a descriptor, or `null` when nothing there can be addressed.
+ *
+ * A role candidate when the live role is one the resolver names and the control has a name — which
+ * is the normal case and the one the fixture exercises (`<a class="btn">OK</a>` → `link`/`OK`). The
+ * text fallback exists because a control's live role is sometimes not in that list (a `<span
+ * role="presentation">` styled as a button) while its text is still unique; the resolver's own
+ * exactly-one-match rule is what keeps that honest. When neither holds the answer is `null` and the
+ * caller escalates, because a dialog nothing can address is a dialog a person has to answer.
+ */
+function describeControl(found: RawDialog): { control: TargetDescriptor | null; via: string } {
+  const name = found.name ?? "";
+  if (name === "") return { control: null, via: "the dialog has no addressable control" };
+
+  const role = found.role ?? "";
+  if (isCandidateRole(role)) {
+    return {
+      control: { candidates: [{ strategy: "role", role, name }] },
+      via: `role=${role}[name=${quote(name)}]`,
+    };
+  }
+  return {
+    control: { candidates: [{ strategy: "text", text: name }] },
+    via: `text=${quote(name)} (its live role ${quote(role)} is not one a role candidate may name)`,
+  };
+}
+
 /**
  * The attributes a form control can be identified by, in the order the label is built. A bank's
  * markup spells the same field `aria-label="Taxpayer SSN"` and `name="taxpayerSsn"`; both spellings
  * are the field, so both go into the label.
  */
+/**
+ * What a read is worth when the caller set no `actionTimeoutMs`: Playwright's own default for
+ * actions, so a driver that never named a budget keeps behaving as it did rather than acquiring a
+ * new one here. Every caller that replays sets it (`policy.document.timing.waitForMs`).
+ */
+const DEFAULT_READ_BUDGET_MS = 30_000;
+
 const FIELD_ATTRIBUTES: string[] = ["aria-label", "name", "id", "placeholder"];
 
 /**

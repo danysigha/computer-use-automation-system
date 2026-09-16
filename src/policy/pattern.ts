@@ -1,19 +1,22 @@
 /**
- * What a policy pattern means — one interpreter, three consumers (§11 P3).
+ * What a policy pattern means — one interpreter, three consumers (§11 P3, §5.2).
  *
  * The shipped policy spells patterns two ways, and both spellings are load-bearing:
  * `redact.fieldPatterns` writes `"password"` (a bare word), `risk.approvalRequired` writes
- * `"/password|ssn|taxid/i"` (a regex literal). If each consumer interpreted those for itself, the
- * risk classifier and the redactor could disagree about whether a field named `taxpayerSsn` is
+ * `"/password|ssn|taxid/i"` (a regex literal), and `recoverableDialogs` writes
+ * `"/confirm activation of account/i"` — a literal whose slashes, read as a bare regex, are two
+ * characters the app never renders. If each consumer interpreted those for itself, the risk
+ * classifier and the redactor could disagree about whether a field named `taxpayerSsn` is
  * sensitive — and a disagreement like that leaks a value, which is the one thing §6's redaction
  * rule exists to prevent. So the interpretation lives here, once.
  *
  * Two rules, and one of them is a deliberate over-match:
  *
  * 1. `/body/flags` is a regex, tested as written.
- * 2. Anything else is a **name fragment**, matched case-insensitively after separators are
- *    removed — so `account_number` (the way the config writes it) matches `accountNumber` (the way
- *    legacy markup writes it), and `ssn` matches `Taxpayer SSN`.
+ * 2. Anything else is a **fragment**, matched case-insensitively — as a name with separators removed
+ *    (`namePattern`), or as prose, literally (`textPattern`). One spelling rule for both, because the
+ *    operator writing the file is one person; two fragment rules, because `account_number` and
+ *    `"Confirm activation of account?"` are not the same kind of string.
  *
  * The over-match direction is intentional: a fragment that matches too much gates an action behind
  * approval (safe) or redacts a harmless value (cosmetic), while a fragment that matches too little
@@ -100,4 +103,45 @@ export function namePattern(source: string): NamePattern {
 
   const fragment = normalizeName(source);
   return { source, matches: (name) => name !== null && fragment !== "" && normalizeName(name).includes(fragment) };
+}
+
+/** A compiled pattern for matching **prose** — a page's text, a dialog's sentence (§5.2). */
+export interface TextPattern {
+  /** The source as the policy wrote it, for logs and messages. */
+  readonly source: string;
+  matches(text: string): boolean;
+}
+
+/**
+ * Compile one policy pattern for matching *prose* rather than a name.
+ *
+ * The spelling rule is `namePattern`'s, deliberately: both kinds are written in one file by one
+ * operator, who should not have to remember which is which. `/body/flags` is a regex, tested as
+ * written — which is how the shipped `recoverableDialogs` entry is spelled.
+ *
+ * The fragment rule is **not** `namePattern`'s, and that difference is why this is a second
+ * function rather than a flag on the first. A *name* fragment drops separators and lowercases, so
+ * `account_number` and `accountNumber` are one name; prose is matched literally and
+ * case-insensitively, punctuation intact, because `"Confirm activation of account for member
+ * 12345?"` is a sentence and not an identifier. Escaping it is what makes that true: read as a
+ * regex, the `?` in a sentence would become a quantifier, and a fragment like `"100 (USD)"` would
+ * be a capture group. A policy author writing a fragment means the characters they typed.
+ */
+export function textPattern(source: string): TextPattern {
+  const literal = parseRegexLiteral(source);
+  if (literal !== null) {
+    if (!compilesAsRegex(literal.body + literal.flags)) throw new PatternSyntaxError(source);
+    const regex = new RegExp(literal.body, literal.flags);
+    return { source, matches: (text) => regex.test(text) };
+  }
+
+  const fragment = source.trim().toLowerCase();
+  return { source, matches: (text) => fragment !== "" && text.toLowerCase().includes(fragment) };
+}
+
+/** Would this text pattern match anything? The dialog schema's usability check, as above. */
+export function isUsableTextPattern(source: string): boolean {
+  const literal = parseRegexLiteral(source);
+  if (literal !== null) return compilesAsRegex(literal.body + literal.flags);
+  return source.trim() !== "";
 }

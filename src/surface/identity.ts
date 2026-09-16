@@ -121,6 +121,51 @@ export async function observeIdentity(page: Page): Promise<IdentityObservation> 
   return identity === null ? ABSENT_IDENTITY : { kind: "observed", identity };
 }
 
+/** How long replay's preflight GET may take before the target is treated as not advertising. */
+const DEFAULT_FETCH_TIMEOUT_MS = 5_000;
+
+/**
+ * The identity a URL advertises, read without a browser (P5's half of §26).
+ *
+ * Preflight runs **before anything is launched**, so it cannot ask a page — and the whole value of
+ * the check is that it happens before a browser is anywhere near the wrong app. So it is a bounded
+ * HTTP GET: one request, one timeout, no session, no follow-up.
+ *
+ * Everything that is not "an HTML response carrying a marker" resolves to `absent`, and that is §26
+ * nit 3 rather than a swallowed error: a network failure, a timeout, a redirect to a login page, a
+ * 404, a PDF — none of them is a claim that the app is *different*, and treating any of them as a
+ * stop would turn an unreachable target into a tenant-drift report. The `unknown` verdict that
+ * follows says the honest thing: the check did not get an answer, and step-level `expect` is the
+ * backstop. Redirects are followed (the marker lives on the page the target actually serves), and
+ * the timeout covers the body read as well as the headers, so a target that answers and then
+ * trickles forever is bounded too.
+ */
+export async function fetchIdentity(
+  url: string,
+  options: { readonly timeoutMs?: number } = {},
+): Promise<IdentityObservation> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  try {
+    const response = await fetch(url, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { accept: "text/html,application/xhtml+xml" },
+    });
+    if (!response.ok) return ABSENT_IDENTITY;
+
+    // Loose about the content type in the direction the module is loose in everywhere else: a type
+    // that names something other than HTML is a definite "no marker here", but a server that sends
+    // no type at all still gets parsed, because an unlabelled page can perfectly well be one.
+    const contentType = response.headers.get("content-type");
+    if (contentType !== null && !/html/i.test(contentType)) return ABSENT_IDENTITY;
+
+    const identity = parseBuildMarker(await response.text());
+    return identity === null ? ABSENT_IDENTITY : { kind: "observed", identity };
+  } catch {
+    return ABSENT_IDENTITY;
+  }
+}
+
 /** The identity to record, from an observation that may have carried none (§26's fallback). */
 export function identityOf(observation: IdentityObservation): AppIdentity {
   return observation.kind === "observed" ? observation.identity : UNKNOWN_IDENTITY;

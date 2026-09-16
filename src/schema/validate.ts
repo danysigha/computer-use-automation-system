@@ -156,6 +156,7 @@ function crossChecks(capability: Capability): ValidationIssue[] {
   checkPlaceholdersResolve(check);
   checkOutcomesAreDistinguishable(check);
   checkWaitsSayHowLong(check);
+  checkActionsCarryTheirValues(check);
   checkOutputsComeFromExtracts(check);
   checkRiskHalvesAgree(check);
 
@@ -238,6 +239,30 @@ function checkWaitsSayHowLong(check: Check): void {
       check.issues.push({
         path: `steps.${index}.ms`,
         message: 'a "fixed" wait is a deliberate pause and must say how long (`ms`)',
+      });
+    }
+  }
+}
+
+/**
+ * An action that writes a value must say which one.
+ *
+ * The schema marks `value` optional because a `click` has none, and that one optional field is what
+ * makes `type`/`select`/`press` with no `value` *parseable* — a step that reads as an instruction to
+ * type nothing. It is the same shape of rule as the `"fixed"` wait above, and it is here for the same
+ * reason: the conditionality cannot sit on the `act` schema without disqualifying it from the
+ * `discriminatedUnion`.
+ *
+ * Caught at save time rather than at replay, because by replay it is expensive: a recording run has
+ * already been paid for, and the artifact would fail mid-run as an `UNEXPECTED_STATE` that names a
+ * field the author could have been told about before anything was saved.
+ */
+function checkActionsCarryTheirValues(check: Check): void {
+  for (const [index, step] of check.capability.steps.entries()) {
+    if (step.kind === "act" && step.action !== "click" && step.value === undefined) {
+      check.issues.push({
+        path: `steps.${index}.value`,
+        message: `a \`${step.action}\` writes a value, so the step must declare one (\`value\`)`,
       });
     }
   }

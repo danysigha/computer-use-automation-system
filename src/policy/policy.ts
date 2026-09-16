@@ -48,7 +48,7 @@ import { z } from "zod";
 import { DEFAULT_PORT } from "../../sample-app/server.ts";
 import type { ActionContext, ActionPolicy, PolicyVerdict } from "../surface/session-driver.ts";
 import { classify, OPERATIONS } from "./risk.ts";
-import { compilesAsRegex, isUsableNamePattern } from "./pattern.ts";
+import { compilesAsRegex, isUsableNamePattern, isUsableTextPattern } from "./pattern.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -127,7 +127,9 @@ const redactSchema = z.strictObject({
 });
 
 const recoverableDialogSchema = z.strictObject({
-  text: z.string().min(1).refine(isUsableNamePattern, { message: "matches nothing — see the pattern rules in src/policy/pattern.ts" }),
+  // Prose, not a name: interpreted by `textPattern`, so `/confirm activation/i` is a regex and a
+  // bare sentence is a literal, case-insensitive fragment of what the page shows.
+  text: z.string().min(1).refine(isUsableTextPattern, { message: "matches nothing — see the pattern rules in src/policy/pattern.ts" }),
   response: z.enum(["accept", "dismiss"]),
 });
 
