@@ -1,0 +1,41 @@
+{
+  "runId": "2026-09-16T22-40-25-611Z",
+  "capability": "sub-account-open",
+  "version": "latest",
+  "inputs": {
+    "memberId": "12345"
+  },
+  "entry": "http://localhost:4173/?sim=dialog=unexpected",
+  "policy": "/Users/danysigha/Desktop/computer-use-automation-system/policy/policy.json",
+  "identity": {
+    "expected": {
+      "product": "atlas-console",
+      "variant": "base",
+      "version": "0.1"
+    },
+    "observed": {
+      "product": "atlas-console",
+      "variant": "base",
+      "version": "0.1"
+    },
+    "verdict": "match",
+    "reason": "the target advertises atlas-console/base@0.1, as recorded"
+  },
+  "risk": {
+    "declared": [],
+    "gated": [],
+    "upgraded": [],
+    "blocked": [],
+    "notes": []
+  },
+  "result": {
+    "status": "success",
+    "outputs": {
+      "confirmation": "Sub-Account Activated"
+    },
+    "evidence": {
+      "runDir": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-16T22-40-25-611Z",
+      "runLog": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-16T22-40-25-611Z/run.jsonl"
+    }
+  }
+}

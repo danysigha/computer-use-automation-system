@@ -62,9 +62,12 @@ import { bind, parseMoney, type Params } from "../replay/step-runner.ts";
 import {
   PROCESS_STREAMS,
   describeUsageError,
+  environmentOverrides,
   evidenceRoot,
   loadDotenv,
   noteWriter,
+  shellArg,
+  writeCommandSheet,
   type Streams,
   type UsageError,
 } from "./io.ts";
@@ -100,6 +103,27 @@ export interface Args {
 }
 
 export type ParsedArgs = { readonly ok: true; readonly args: Args } | UsageError;
+
+/**
+ * The command that produced a run — §11 P8's `COMMAND.md`, spelled from the parsed arguments rather
+ * than from `process.argv`.
+ *
+ * The two differ in exactly the way that matters for a recipe: `argv` is whatever the caller typed
+ * (flags in any order, `--version latest` spelled out, a relative `--policy` path), while this is the
+ * canonical form of the same run. A reader copying it gets the run that was made, not a transcription
+ * of one invocation of it. Values are quoted only when a shell would otherwise mangle them.
+ */
+export function replayCommandLine(args: Args): string {
+  const parts = ["npm", "run", "replay", "--", args.id];
+  if (args.version !== "latest") parts.push("--version", shellArg(args.version));
+  for (const [name, value] of args.inputs) parts.push(`--${name}`, shellArg(value));
+  if (args.entry !== null) parts.push("--entry", shellArg(args.entry));
+  if (args.policyFile !== null) parts.push("--policy", shellArg(args.policyFile));
+  if (args.allowDrift) parts.push("--allow-drift");
+  if (args.headed) parts.push("--headed");
+  if (args.json) parts.push("--json");
+  return parts.join(" ");
+}
 
 /**
  * The grammar, parsed by hand — the same choice `discover` makes and for the same reason: the errors
@@ -511,9 +535,56 @@ export async function runReplay(argv: readonly string[], streams: Streams = PROC
     result,
   });
 
+  // §11 P8: the run's recipe, written last so the directory it names is complete by the time anyone
+  // reads it. It is the one part of the evidence that cannot be reconstructed from `run.jsonl` — the
+  // log records what happened, not how the process was invoked.
+  await writeCommandSheet(redactor, runDir, {
+    // Deliberately not the capability's `name`: that string is a stored, length-capped display name
+    // (it can end in an ellipsis), and a file that opens by truncating its own subject reads worse
+    // than one that names the id a reader can look up. The artifact is in the same repo.
+    what: `replay — ${capability.id} (${args.version})`,
+    command: replayCommandLine(args),
+    outcome: outcomeLine(result),
+    exitCode: exitCodeFor(result),
+    notes: [
+      `Drift preflight (§26) — ${identity.verdict}: ${identity.reason}.`,
+      ...(entry.includes("sim=")
+        ? [
+            "`--entry` carries a `?sim=` state. Sim states are session-scoped in the fixture: the state set here stays in force for every later navigation and form post in this run, which is how the run reaches the step it demonstrates rather than only its first page.",
+          ]
+        : []),
+      ...(args.headed
+        ? [
+            "This run was launched `--headed`: the browser window was visible for the whole run, which is what makes the escalation handoff watchable rather than asserted.",
+          ]
+        : []),
+      ...environmentOverrides(),
+      ...(exitCodeFor(result) === 0
+        ? []
+        : [
+            "The exit code above is this run's result, not a broken reproduction: the command is right, and the state it was pointed at is what the result describes.",
+          ]),
+    ],
+  });
+
   const text = args.json ? redactor.serialize(result, 2) : redactor.scrubText(describeResult(result).join("\n"));
   streams.out(`${text}\n`);
   return exitCodeFor(result);
+}
+
+/**
+ * The run's result in one line, for `COMMAND.md`.
+ *
+ * `describeResult` is the summary a terminal prints, and this is the same text with the two evidence
+ * paths dropped: the file *is* in that directory, so repeating the absolute paths inside it would be
+ * the one fact a reader can see with `ls`. Otherwise the wording is deliberately §5.4's — a reader
+ * comparing the file against the terminal output they just got should find the same words.
+ */
+function outcomeLine(result: RunResult): string {
+  const lines = describeResult(result).filter(
+    (line) => !line.trim().startsWith("evidence:") && !line.trim().startsWith("run log:"),
+  );
+  return lines.map((line) => line.trim()).join(" — ");
 }
 
 /**

@@ -1,0 +1,19 @@
+{"seq":1,"at":"2026-09-16T22:42:27.937Z","kind":"note","actor":"agent","message":"control bus: http://127.0.0.1:4517 (loopback only, per-request bearer)"}
+{"seq":2,"at":"2026-09-16T22:42:27.938Z","actor":"agent","kind":"note","subject":"replay","message":"replay: member-savings-balance — 3 step(s) from http://localhost:4173/","inputs":{"memberId":"12347"}}
+{"seq":3,"at":"2026-09-16T22:42:27.940Z","kind":"note","actor":"agent","message":"replay: member-savings-balance vlatest — 3 step(s) from http://localhost:4173/"}
+{"seq":4,"at":"2026-09-16T22:42:27.940Z","actor":"agent","kind":"note","subject":"appIdentity","expected":{"product":"atlas-console","variant":"base","version":"0.1"},"observed":{"product":"atlas-console","variant":"base","version":"0.1"},"verdict":"match","reason":"the target advertises atlas-console/base@0.1, as recorded"}
+{"seq":5,"at":"2026-09-16T22:42:27.941Z","actor":"agent","kind":"decision","subject":"step","stepId":null,"message":"step entry: load the entry page http://localhost:4173/"}
+{"seq":6,"at":"2026-09-16T22:42:27.942Z","kind":"note","actor":"agent","message":"step entry: load the entry page http://localhost:4173/"}
+{"seq":7,"at":"2026-09-16T22:42:27.977Z","kind":"action","actor":"agent","action":"navigate http://localhost:4173/","outcome":"executed","rule":"allowlist.origin","approval":"not-required","url":"http://localhost:4173/"}
+{"seq":8,"at":"2026-09-16T22:42:28.000Z","actor":"agent","kind":"decision","subject":"step","stepId":1,"message":"step 1: type role=textbox[name=\"Member ID\"] +1 fallback(s) then role=textbox[name=\"Member ID\"] +1 fallback(s) shows \"12347\""}
+{"seq":9,"at":"2026-09-16T22:42:28.001Z","kind":"note","actor":"agent","message":"step 1: type role=textbox[name=\"Member ID\"] +1 fallback(s) then role=textbox[name=\"Member ID\"] +1 fallback(s) shows \"12347\""}
+{"seq":10,"at":"2026-09-16T22:42:28.089Z","kind":"action","actor":"agent","action":"type into target (5 chars)","outcome":"executed","rule":"allowlist.action","approval":"not-required","resolvedBy":"role","url":"http://localhost:4173/"}
+{"seq":11,"at":"2026-09-16T22:42:28.110Z","actor":"agent","kind":"decision","subject":"step","stepId":2,"message":"step 2: click role=button[name=\"Search\"] +1 fallback(s) then the URL contains \"/search?memberId=12347\""}
+{"seq":12,"at":"2026-09-16T22:42:28.111Z","kind":"note","actor":"agent","message":"step 2: click role=button[name=\"Search\"] +1 fallback(s) then the URL contains \"/search?memberId=12347\""}
+{"seq":13,"at":"2026-09-16T22:42:28.186Z","kind":"action","actor":"agent","action":"click target","outcome":"executed","rule":"allowlist.action","approval":"not-required","resolvedBy":"role","url":"http://localhost:4173/search?memberId=12347"}
+{"seq":14,"at":"2026-09-16T22:42:28.210Z","actor":"agent","kind":"decision","subject":"step","stepId":3,"message":"step 3: read text=\"$4,201.55\" +2 fallback(s) as output \"savingsBalance\""}
+{"seq":15,"at":"2026-09-16T22:42:28.211Z","kind":"note","actor":"agent","message":"step 3: read text=\"$4,201.55\" +2 fallback(s) as output \"savingsBalance\""}
+{"seq":16,"at":"2026-09-16T22:42:28.257Z","actor":"agent","kind":"observation","subject":"output","stepId":3,"name":"savingsBalance","type":"money","redacted":false,"value":980.12}
+{"seq":17,"at":"2026-09-16T22:42:28.258Z","kind":"note","actor":"agent","message":"  read savingsBalance"}
+{"seq":18,"at":"2026-09-16T22:42:28.273Z","actor":"agent","kind":"note","subject":"success","message":"the success condition holds"}
+{"seq":19,"at":"2026-09-16T22:42:28.274Z","kind":"note","actor":"agent","message":"success condition holds"}

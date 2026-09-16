@@ -1,0 +1,38 @@
+{
+  "runId": "2026-09-16T22-40-18-090Z",
+  "capability": "member-savings-balance",
+  "version": "latest",
+  "inputs": {
+    "memberId": "12345"
+  },
+  "entry": "http://localhost:4173/?sim=record-locked",
+  "policy": "/Users/danysigha/Desktop/computer-use-automation-system/policy/policy.json",
+  "identity": {
+    "expected": {
+      "product": "atlas-console",
+      "variant": "base",
+      "version": "0.1"
+    },
+    "observed": {
+      "product": "atlas-console",
+      "variant": "base",
+      "version": "0.1"
+    },
+    "verdict": "match",
+    "reason": "the target advertises atlas-console/base@0.1, as recorded"
+  },
+  "risk": {
+    "declared": [],
+    "gated": [],
+    "upgraded": [],
+    "blocked": [],
+    "notes": []
+  },
+  "result": {
+    "status": "business-outcome",
+    "outcome": {
+      "code": "RECORD_LOCKED",
+      "message": "Member 12345 is locked"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "runId": "2026-09-16T22-40-16-484Z",
+  "capability": "member-savings-balance",
+  "version": "latest",
+  "inputs": {
+    "memberId": "99999"
+  },
+  "entry": "http://localhost:4173/",
+  "policy": "/Users/danysigha/Desktop/computer-use-automation-system/policy/policy.json",
+  "identity": {
+    "expected": {
+      "product": "atlas-console",
+      "variant": "base",
+      "version": "0.1"
+    },
+    "observed": {
+      "product": "atlas-console",
+      "variant": "base",
+      "version": "0.1"
+    },
+    "verdict": "match",
+    "reason": "the target advertises atlas-console/base@0.1, as recorded"
+  },
+  "risk": {
+    "declared": [],
+    "gated": [],
+    "upgraded": [],
+    "blocked": [],
+    "notes": []
+  },
+  "result": {
+    "status": "business-outcome",
+    "outcome": {
+      "code": "NO_SUCH_ENTITY",
+      "message": "No member 99999 on file"
+    }
+  }
+}

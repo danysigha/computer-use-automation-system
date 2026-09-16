@@ -13,8 +13,10 @@
  * before it reads the file back.
  */
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Redactor } from "../policy/redact.ts";
 import type { EvidenceLogger } from "../surface/evidence.ts";
 
 /**
@@ -104,4 +106,120 @@ export function noteWriter(evidence: EvidenceLogger, streams: Streams): NoteWrit
     },
     flush: () => queue.then(() => undefined),
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The run's recipe — `COMMAND.md`                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a run directory says about **how to make it again** (§11 P8).
+ *
+ * Every field here is something the run already knows about itself, which is the point: a run's
+ * evidence is only worth what someone else can reproduce, and the reproduction command is the one
+ * piece of it that cannot be *derived* from the log — the flags that were passed are not in
+ * `run.jsonl`, because the log records what happened rather than how the process was invoked.
+ *
+ * `outcome` and `exitCode` are here for the same reason, one level up: a run that ends in a
+ * classified failure exits `1`, and a reader who re-runs it must know that the non-zero exit is
+ * the demonstration rather than a broken copy-paste.
+ */
+export interface CommandSheet {
+  /** The exact command, as a shell line — `npm run replay -- …`. */
+  readonly command: string;
+  /** What this run is, in the words of the command that produced it. */
+  readonly what: string;
+  /** How it ended: the status, the code, and the value or paths behind it. */
+  readonly outcome: string;
+  /** §5.4's exit code for *this* run — `0` success or business outcome, `1` failure, `2` refused. */
+  readonly exitCode: number;
+  /** Anything true of this run that its command alone does not show (the §26 identity, a sim, …). */
+  readonly notes?: readonly string[];
+}
+
+/** §5.4's exit codes, in the words a reader of a run directory needs them in. */
+const EXIT_MEANINGS: Readonly<Record<number, string>> = {
+  0: "success or business outcome — both are legitimate answers a caller acts on",
+  1: "run failure — the run happened and the result is a classified failure",
+  2: "usage or preflight error — the run never started",
+};
+
+/**
+ * A value, quoted for `sh` when it needs to be — and only then, so the common case stays copy-
+ * pasteable without noise.
+ *
+ * The hostile characters are the ones a URL or a goal sentence actually contains: spaces, `?`,
+ * `&`, `=`, `$`, quotes. Single quotes defeat all of them, and the one character single quotes
+ * cannot carry is the single quote itself, which closes and reopens around an escaped one — the
+ * POSIX idiom, written out rather than clever.
+ */
+export function shellArg(value: string): string {
+  if (value !== "" && /^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * The environment in force when the run happened, as one line — or nothing, when nothing was set.
+ *
+ * Only the knobs §5.4 defines, and only when they are set: a `COMMAND.md` that lists every knob it
+ * could have been given is a config reference, and the README already is one. What a reproduction
+ * needs to see is what this process actually read — `POLICY_PATH` when a shrunk timing was in force,
+ * `PORT` when the fixture had been moved — because those are the differences that make a copy-paste
+ * fail. It is phrased as "in force" rather than "you must set this" because the environment reaches
+ * this process through `.env` as well as through the shell, and the file should not guess which.
+ */
+export function environmentOverrides(env: NodeJS.ProcessEnv = process.env): readonly string[] {
+  const knobs = ["PORT", "BUS_PORT", "POLICY_PATH", "OPENAI_MODEL", "EVIDENCE_DIR"];
+  const set = knobs.filter((name) => (env[name] ?? "") !== "").map((name) => `\`${name}=${env[name] ?? ""}\``);
+  return set.length === 0 ? [] : [`In force for this command: ${set.join(", ")}.`];
+}
+
+/**
+ * Write the run's `COMMAND.md`.
+ *
+ * Through `scrubText`, like every other text sink (§6): the command quotes the run's own inputs, and
+ * an input is exactly the place a caller's value reaches disk. A run whose arguments are all
+ * harmless writes them verbatim; a run handed a `fieldPatterns`-matched value writes the mask. The
+ * alternative — exempting a file because "it is only a shell command" — is how a sink list stops
+ * being exhaustive.
+ */
+export async function writeCommandSheet(redactor: Redactor, runDir: string, sheet: CommandSheet): Promise<void> {
+  const lines: string[] = [
+    `# ${sheet.what}`,
+    "",
+    "This directory is one run: `run.jsonl` is the step-by-step record, `summary.json` is the same run as one object, and the command below is what produced both.",
+    "",
+    "## Regenerate this run",
+    "",
+    "Once per machine:",
+    "",
+    "```sh",
+    "npm ci",
+    "npx playwright install chromium",
+    "```",
+    "",
+    "Then, with the fixture app running in another terminal:",
+    "",
+    "```sh",
+    "npm run app",
+    sheet.command,
+    "```",
+    "",
+    "## What this run ended as",
+    "",
+    `Exit code \`${sheet.exitCode}\` — ${EXIT_MEANINGS[sheet.exitCode] ?? "see the README's exit-code table"}.`,
+    "",
+    `${sheet.outcome}`,
+    "",
+    "## Notes",
+    "",
+  ];
+
+  const notes = sheet.notes ?? [];
+  if (notes.length === 0) lines.push("- Nothing beyond the command above: this run used every default.");
+  else for (const note of notes) lines.push(`- ${note}`);
+
+  lines.push("");
+  await mkdir(runDir, { recursive: true });
+  await writeFile(join(runDir, "COMMAND.md"), redactor.scrubText(`${lines.join("\n")}\n`), "utf8");
 }

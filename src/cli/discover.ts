@@ -65,9 +65,12 @@ import { SessionDriver, type ApprovalHandler } from "../surface/session-driver.t
 import {
   PROCESS_STREAMS,
   describeUsageError,
+  environmentOverrides,
   evidenceRoot,
   loadDotenv,
   noteWriter,
+  shellArg,
+  writeCommandSheet,
   type NoteWriter,
   type Streams,
   type UsageError,
@@ -251,6 +254,33 @@ function firstDuplicate(names: readonly string[]): string | null {
 }
 
 /**
+ * The command that produced a run — §11 P8's `COMMAND.md`, spelled from the parsed arguments rather
+ * than from `process.argv`, so a reader copying it gets the run that was made rather than a
+ * transcription of one invocation of it. The goal is quoted: it is a sentence, and a sentence with
+ * spaces in a shell is one word.
+ */
+export function discoverCommandLine(args: Args): string {
+  const parts = ["npm", "run", "discover", "--", "--goal", shellArg(args.goal)];
+  for (const param of args.params) parts.push("--param", shellArg(`${param.name}=${param.value}`));
+  if (args.entry !== null) parts.push("--entry", shellArg(args.entry));
+  if (args.id !== null) parts.push("--id", shellArg(args.id));
+  if (args.headed) parts.push("--headed");
+  if (args.json) parts.push("--json");
+  return parts.join(" ");
+}
+
+/**
+ * The run's result in one line, for `COMMAND.md` — §5.4's own words, with the two evidence paths
+ * dropped, since the file already sits in that directory.
+ */
+function outcomeLine(result: RunResult): string {
+  return describeResult(result)
+    .filter((line) => !line.trim().startsWith("evidence:") && !line.trim().startsWith("run log:"))
+    .map((line) => line.trim())
+    .join(" — ");
+}
+
+/**
  * The capability id, when the caller did not name one.
  *
  * Derived from the goal, which is the only text there is — with the declared params' samples swapped
@@ -416,6 +446,29 @@ export async function runDiscover(argv: readonly string[], streams: Streams = PR
 
   await writeSummary(redactor, runDir, { runId, args, entry, model: config.model, identity, run, result });
   await writer.flush();
+
+  // §11 P8: the run's recipe. `discover`'s differs from `replay`'s in one way that the file says out
+  // loud — a re-run is a fresh recording rather than the same run again — because a reader who
+  // expects byte-identical evidence from a model-driven command is expecting something the plan never
+  // claims and this command cannot give.
+  await writeCommandSheet(redactor, runDir, {
+    what: `discover — ${args.id ?? deriveId(args.goal, args.params)}: ${args.goal}`,
+    command: discoverCommandLine(args),
+    outcome: outcomeLine(result),
+    exitCode: exitCodeFor(result),
+    notes: [
+      "This command needs `OPENAI_API_KEY` (discovery is the one paid, model-driven step); replaying what it records does not.",
+      "Discovery is model-driven, so re-running it is a *fresh recording*, not this one again: the model's choices, the recorded targets and the resulting artifact can all differ. The review pass is deterministic — it seeds the artifact's `outcomes[]` from `policy.json`'s curated vocabulary and stamps `reviewedBy: human` — so a re-run is reproducible in shape, not in bytes.",
+      `The recording lands in \`capabilities/${args.id ?? deriveId(args.goal, args.params)}/v1/artifact.json\` — the run log's own \`saved …\` line names the exact directory this run wrote.`,
+      `The surface advertised \`${describeIdentityBlock(identity)}\` at the end of the run, which is what the artifact's \`app\` block is stamped with.`,
+      ...environmentOverrides(),
+      ...(exitCodeFor(result) === 0
+        ? []
+        : [
+            "The exit code above is this run's result, not a broken reproduction: the command is right, and what it ran into is what the result describes.",
+          ]),
+    ],
+  });
 
   const text = args.json
     ? redactor.serialize(result, 2)
