@@ -37,6 +37,13 @@ export interface ConsoleIo {
   readonly readLine: (prompt: string) => Promise<string | null>;
   /** Open a file in the OS viewer (`open`/`xdg-open`). Failures are the caller's to swallow. */
   readonly openFile: (path: string) => void;
+  /**
+   * Give the terminal back. Optional because it is about the *process* rather than about the console:
+   * an in-process caller that supplied its own line source has nothing to release and no event loop to
+   * release it from. A real terminal does — see `terminalIo` in `src/cli/operator.ts`, where an
+   * interface still attached to stdin is what keeps a finished command from exiting.
+   */
+  readonly close?: () => void;
 }
 
 export interface ConsoleOptions {

@@ -32,6 +32,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { stripComments } from "../helpers/source-scan.ts";
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "../../src");
 
@@ -46,16 +47,6 @@ const SERIALIZER_CALL = /JSON\.stringify\s*\(/;
  * secret in an inbound file is a leak the file already had.
  */
 const EXEMPT = ["policy/redact.ts", "store/", "control/bus-client.ts"];
-
-/**
- * Comments are stripped before scanning, because the files that *describe* this rule necessarily
- * name the call it forbids. A `//` is only treated as a comment when it opens a line (or follows
- * whitespace) — good enough for source we control, and the assertion below proves the stripper
- * still sees real calls rather than having flattened the file into nothing.
- */
-export function stripComments(source: string): string {
-  return source.replaceAll(/\/\*[\s\S]*?\*\//g, " ").replaceAll(/(^|\s)\/\/[^\n]*/g, "$1");
-}
 
 async function sourceFiles(): Promise<readonly string[]> {
   const entries = await readdir(SRC, { recursive: true, withFileTypes: true });

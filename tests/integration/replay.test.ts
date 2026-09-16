@@ -91,6 +91,43 @@ function literalized(value: unknown): unknown {
   );
 }
 
+/**
+ * The same artifact with its `RECORD_LOCKED` signature loosened to the bare word — the control for
+ * the decoy case below.
+ *
+ * One pattern changes and nothing else, so the pair (this and the committed file) isolates what the
+ * anchoring is doing: §10's happy page says "Locked" as chrome and as a dormant account's row, and a
+ * signature that settled for the word would call that an answer.
+ */
+function looseSignature(): Capability {
+  const recorded = artifact();
+  const outcomes = recorded.outcomes.map((outcome) =>
+    outcome.code === "RECORD_LOCKED" ? { ...outcome, detect: { kind: "text-on-page" as const, pattern: "Locked" } } : outcome,
+  );
+  return parseCapability({ ...recorded, outcomes }, "sub-account-open with a loose signature");
+}
+
+/**
+ * The same artifact plus the one signature a reviewer adds on seeing the form refused.
+ *
+ * §5.2 puts `VALIDATION_ERROR` in the *business outcome* family — the app answered, and the answer is
+ * no — and §10's reachability map points at goal 2 for it. The committed recording does not declare it
+ * (that run never saw a validation error, and §9 seeds `outcomes[]` from what a run saw), so the
+ * declaration is made here, anchored to the message the fixture really renders (§10's pinned text).
+ */
+function withValidationError(): Capability {
+  const recorded = artifact();
+  const outcomes = [
+    ...recorded.outcomes,
+    {
+      code: "VALIDATION_ERROR",
+      detect: { kind: "text-on-page" as const, pattern: "Sub-account type is not available for this member" },
+      message: "the app refused the sub-account request",
+    },
+  ];
+  return parseCapability({ ...recorded, outcomes }, "sub-account-open with a validation-error signature");
+}
+
 /* -------------------------------------------------------------------------- */
 /* Harness                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -331,6 +368,16 @@ describe("replaying the recorded artifact", () => {
     expect(failure.expected).toContain(`/member/${MEMBER}/summary`);
     expect(failure.observed).toContain(`/member/${other}/summary`);
   });
+
+  it("passes the page's decoy text only because the recorded signature is anchored (§4.1, §10)", async () => {
+    // The happy path above succeeds on a page that carries "Locked" twice — the shell's "Locked
+    // Accounts Report" link and a dormant account row — and that is the decoy, stated as a property
+    // rather than as a coincidence: the loosened copy below is the same artifact with one pattern
+    // widened, and it takes that text for the app's answer before the flow has started.
+    const surface = await surfaceWith();
+    const run = await replay(surface, { entry: surface.base, capability: looseSignature() });
+    expect(outcomeOf(run.result).code).toBe("RECORD_LOCKED");
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -371,6 +418,34 @@ describe("an outcome the artifact declares", () => {
     expect(outcome.code).toBe("PERMISSION_DENIED");
     expect(outcome.message).toBe(`Access to member ${MEMBER} is restricted`);
     expect(run.elapsedMs).toBeLessThan(3_000);
+  });
+
+  it("reads a refused form as VALIDATION_ERROR — an answer, not a wrong page (§5.2, §10)", async () => {
+    // The fourth code of §5.2's first family, and the one whose detection is easiest to get wrong: the
+    // form POST answers 200 with the *same* form carrying two error lines, so a run that only compared
+    // URLs would file this as a checkpoint mismatch. §10's reachability map names this state as the
+    // reason goal 2 exists; what makes it an answer rather than a wrong page is the outcome probe
+    // running before the step's own `expect` does.
+    const surface = await surfaceWith();
+    const run = await replay(surface, {
+      entry: simUrl(surface, "validation-error"),
+      capability: withValidationError(),
+    });
+
+    const outcome = outcomeOf(run.result);
+    expect(outcome.code).toBe("VALIDATION_ERROR");
+    expect(outcome.message).toBe("the app refused the sub-account request");
+    expect(run.elapsedMs).toBeLessThan(3_000);
+
+    // The control, and the pair is the point: the committed artifact — which declares no such
+    // signature, because the run that recorded it never saw this state — meets the same page and ends
+    // as a failure. Nothing about the page differs between the two runs; the declaration does.
+    //
+    // `CHECKPOINT_MISMATCH` and not `ELEMENT_NOT_FOUND`, which is §22's boundary doing its job: the
+    // page *settled* — the form came back with its errors — and the answer is simply the wrong one, so
+    // re-asking would see the same page. Only a state that never arrived is worth another attempt.
+    const control = await replay(surface, { entry: simUrl(surface, "validation-error") });
+    expect(failed(control.result).errorCode).toBe("CHECKPOINT_MISMATCH");
   });
 });
 

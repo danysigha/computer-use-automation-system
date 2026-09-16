@@ -1142,3 +1142,51 @@ describe("the `replay` command in its own process", () => {
     expect(log).toContain('"actor":"human"');
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* The console as a command                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The console has two lives: the one above, driven in-process by a scripted line source, and the one
+ * §15's transcript actually shows — `npm run operator`, on a terminal, in its own process.
+ *
+ * The difference between them is not the console's logic, which is shared; it is the *handle*. A
+ * terminal is an open stream attached to the process, and a finished command that leaves one behind
+ * never exits: it prints its last line and hangs, which in the transcript is a prompt that never comes
+ * back. No in-process test can see that, and neither can a shell pipeline — piping `printf … |` closes
+ * the pipe and hands the command an EOF nothing real ever sends.
+ */
+describe("the `operator` command in its own process", () => {
+  it("gives the terminal back and exits once the session is over", async () => {
+    // A stdin that is opened and never written to, never ended: the shape a TTY has, and the only one
+    // that distinguishes "the console finished" from "the process finished". The bus is deliberately
+    // not there — a refused nonce ends the session too, and it ends it in a second.
+    const child = spawn(
+      process.execPath,
+      ["src/cli/operator.ts", "--nonce", "0".repeat(32), "--bus", "http://127.0.0.1:1"],
+      { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    booted.push(async () => {
+      if (child.exitCode === null) child.kill("SIGKILL");
+    });
+    // The console narrates to its own stream (`io.out`), which for this command is stdout — the
+    // operator's terminal — so that is where the ending is asserted, and stderr stays the CLI's.
+    let out = "";
+    child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString("utf8")));
+
+    const code = await new Promise<number | null>((done, fail) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        fail(new Error(`\`operator\` printed its ending and never exited — stdin was still held open.\n${out}`));
+      }, 20_000);
+      child.on("exit", (exit) => {
+        clearTimeout(timer);
+        done(exit);
+      });
+    });
+
+    expect(code).toBe(2);
+    expect(out).toContain("is not answering");
+  });
+});

@@ -149,6 +149,23 @@ export function terminalIo(
         // The path is printed either way, so the operator can open it by hand.
       }
     },
+    /**
+     * Let the command end.
+     *
+     * A readline interface holds stdin open in flowing mode, and an open handle is enough to keep a
+     * Node process alive after its work is done — so a console that handed the session back (or that
+     * never acquired it) would print its last line and then sit there, while the operator waits for a
+     * prompt that has already been served. Detaching and pausing the stream is what lets the process
+     * exit with the code the session ended on.
+     *
+     * Found by running §15's two-terminal transcript rather than by reading this file: a piped script
+     * closes its own pipe and hides the difference, and an in-process console has no event loop of its
+     * own to be kept alive.
+     */
+    close: () => {
+      readline.close();
+      inputStream.pause();
+    },
   };
 }
 
@@ -165,13 +182,20 @@ export async function runOperator(
   loadDotenv();
   const { args } = parsed;
 
+  const consoleIo = io ?? terminalIo(streams);
   const console_ = new OperatorConsole({
     bus: args.bus,
     nonce: args.nonce,
     heartbeatMs: args.heartbeatMs,
-    io: io ?? terminalIo(streams),
+    io: consoleIo,
   });
-  return console_.run();
+  try {
+    return await console_.run();
+  } finally {
+    // Every ending gives the terminal back — handback, decline, a lease that lapsed, or a nonce that
+    // was refused — because in all of them the command is over and the operator's shell is next.
+    consoleIo.close?.();
+  }
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {

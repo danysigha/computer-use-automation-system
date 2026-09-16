@@ -305,6 +305,21 @@ describe("matching an outcome signature", () => {
     expect(await matchOutcome("Savings Balance $4,201.55", OUTCOMES, always)).toBeNull();
   });
 
+  it("does not fire on the decoy text a happy page really carries (§10)", async () => {
+    // The fixture's happy page says "Locked" twice — the shell's "Locked Accounts Report" link and a
+    // dormant account's row — so a signature written as the bare word would answer `RECORD_LOCKED` on
+    // a page that means nothing of the sort, and would do it before the flow started. §4.1's rule is
+    // that a signature carries the whole pinned sentence; the loosened copy is the control that says
+    // the decoy is genuinely matchable text rather than a rumour about the fixture.
+    const page = "Harbor Credit Union\nLocked Accounts Report\nHoliday Club $0.00 Locked";
+    expect(await matchOutcome(page, OUTCOMES, never)).toBeNull();
+
+    const loosened: readonly BusinessOutcome[] = OUTCOMES.map((outcome) =>
+      outcome.code === "RECORD_LOCKED" ? { ...outcome, detect: { kind: "text-on-page", pattern: "Locked" } } : outcome,
+    );
+    expect((await matchOutcome(page, loosened, never))?.outcome.code).toBe("RECORD_LOCKED");
+  });
+
   it("treats each pattern as a fresh regex", async () => {
     // Compiled per call on purpose: a cached `/g` regex carries `lastIndex` between polls, and the
     // symptom would be an outcome that fires on every other poll rather than on every one.
