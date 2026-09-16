@@ -21,6 +21,12 @@
  *   payloads come from `artifact.json`, and P2's schema already refuses unknown fields, so there is
  *   no path by which a page's text reaches one. If that ever stops being true, this exemption is
  *   the line to delete.
+ * - `src/control/bus-client.ts` — the console's *client*, added with P6. The only payload it can
+ *   build is the request body it posts to the run's bus, and that one must travel unscrubbed: it is
+ *   the operator's own typed value on its way to the page, and masking it would break the input the
+ *   human is there to provide. Everything the console *renders* arrives already scrubbed, because the
+ *   bus serializes with the run's redactor before the bytes leave. The exemption is pinned by a test
+ *   below (`one call, and it is the request`), so a future sink cannot hide in this file.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
@@ -39,7 +45,7 @@ const SERIALIZER_CALL = /JSON\.stringify\s*\(/;
  * direction (a policy file, an artifact on disk), it constructs no sink payload, and a leaked
  * secret in an inbound file is a leak the file already had.
  */
-const EXEMPT = ["policy/redact.ts", "store/"];
+const EXEMPT = ["policy/redact.ts", "store/", "control/bus-client.ts"];
 
 /**
  * Comments are stripped before scanning, because the files that *describe* this rule necessarily
@@ -119,6 +125,19 @@ describe("the one-serializer rule", () => {
     expect(store.some((file) => file.endsWith(".ts"))).toBe(true);
     const calls = (await serializerCalls()).filter((call) => call.startsWith("store/"));
     expect(calls).toEqual([]);
+  });
+
+  it("keeps the console client's exemption to the request body it exists to send", async () => {
+    // The exemption above is for a *transport*, not for a renderer. Pinned two ways: the file that
+    // serializes is the wire client, and it does it exactly once. A second call there — a rendered
+    // payload, say — fails this test rather than slipping past the scan.
+    const client = stripComments(await readFile(join(SRC, "control/bus-client.ts"), "utf8"));
+    expect(client.match(/JSON\.stringify\s*\(/g)?.length ?? 0).toBe(1);
+    expect(client).toContain("body: JSON.stringify(body)");
+    // And the console's own render/grammar file is *not* exempt: everything it prints has to come from
+    // a bus payload the run process already scrubbed.
+    const console_ = stripComments(await readFile(join(SRC, "control/console-tui.ts"), "utf8"));
+    expect(console_.match(/JSON\.stringify\s*\(/g)?.length ?? 0).toBe(0);
   });
 
   it("is the rule the source files point at, so a reader finds it from either end", async () => {

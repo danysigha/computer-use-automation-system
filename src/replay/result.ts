@@ -29,6 +29,7 @@
  *    result is built (`Redactor.output`, §6's precedence), so a summary and a `--json` payload come
  *    from one already-redacted object rather than from two render sites that could disagree.
  */
+import type { RunStage } from "../control/escalation.ts";
 import { hintFor } from "./taxonomy.ts";
 
 /** Where a run's evidence lives. Paths, not contents — the caller opens them. */
@@ -43,7 +44,12 @@ export interface EvidenceRefs {
 /** §5.3's escalation lifecycle: what happened to the human decision the run asked for. */
 export type Escalation = "none" | "human-took-over" | "declined" | "no-operator";
 
-export type RunStage = "discovery" | "replay";
+/**
+ * Which run this is. §8's escalation payload spells the same word, so it lives with the escalation
+ * contract (`control/escalation.ts`) and is re-exported here rather than defined twice — two literal
+ * unions that happen to agree today are two unions that can disagree tomorrow.
+ */
+export type { RunStage } from "../control/escalation.ts";
 
 export type RunResult =
   | { readonly status: "success"; readonly outputs: Readonly<Record<string, unknown>>; readonly evidence: EvidenceRefs }

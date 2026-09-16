@@ -42,6 +42,7 @@
  * reason are in the run log, so a human who wants the action to have happened can widen the
  * allowlist and re-run; that is the correct direction for the decision to travel.
  */
+import { answerOutcome, noOperator, type EscalationHandler, type EscalationOutcome } from "../control/escalation.ts";
 import type { Policy } from "../policy/policy.ts";
 import { checkOperation, type DriverOperation } from "../policy/risk.ts";
 import { captureTarget } from "../surface/capture.ts";
@@ -91,9 +92,20 @@ import {
  */
 export type DiscoveryEnding =
   | { readonly kind: "completed"; readonly outputs: Readonly<Record<string, string>> }
-  | { readonly kind: "stuck"; readonly reason: StuckReason }
+  /**
+   * The detector gave up — and, since P6, only *after* a human was asked. §8 routes the stuck verdict
+   * to the Controller: a person can often clear in one action what the model cannot clear in five, and
+   * the run then re-observes and continues. The `escalation` field says what came of the asking, which
+   * is the difference between "nobody was there" and "a person looked and could not help either".
+   */
+  | { readonly kind: "stuck"; readonly reason: StuckReason; readonly escalation?: EscalationOutcome }
   | { readonly kind: "gave-up"; readonly reason: string }
-  | { readonly kind: "escalated"; readonly reason: string; readonly request: ApprovalRequest | null }
+  | {
+      readonly kind: "escalated";
+      readonly reason: string;
+      readonly request: ApprovalRequest | null;
+      readonly escalation?: EscalationOutcome;
+    }
   | { readonly kind: "blocked"; readonly verdict: PolicyVerdict }
   | { readonly kind: "failed"; readonly error: Error };
 
@@ -121,6 +133,12 @@ export interface DiscoveryOptions {
   readonly entry: string;
   readonly goal: string;
   readonly render?: RenderOptions;
+  /**
+   * §8's escalation seam. The CLI hands it the Controller (so a stuck run asks a human over the
+   * control bus); everything else — and every test that does not care — gets `noOperator`, which is
+   * the same terminal reached immediately rather than after ten minutes of waiting.
+   */
+  readonly escalation?: EscalationHandler;
   /** Run narration. Receives **already-scrubbed** text — the loop scrubs before calling (§6). */
   readonly onNote?: (line: string) => void;
 }
@@ -163,6 +181,7 @@ interface Applied {
 
 export async function runDiscovery(options: DiscoveryOptions): Promise<DiscoveryRun> {
   const { driver, agent, policy, budgets } = options;
+  const escalate = options.escalation ?? noOperator;
   const redactor = driver.redactor;
   const observer = new ObserverDriver(driver, {
     render: options.render,
@@ -509,11 +528,31 @@ export async function runDiscovery(options: DiscoveryOptions): Promise<Discovery
 
       case "requestApproval": {
         const what = requiredString(tool, args, "action");
+        const answer = await escalate({
+          code: "APPROVAL_REQUIRED",
+          stepId: turn,
+          reason: `the model asked for a human: ${what}`,
+          url: driver.page.url(),
+          observed: what,
+          evidenceDir: driver.evidenceDir,
+        });
+        const outcome = answerOutcome(answer);
+        if (outcome !== "took-over") {
+          return {
+            call,
+            outcome: "escalated to a human",
+            entry: null,
+            ending: { kind: "escalated", reason: what, request: null, escalation: outcome },
+            correction: null,
+          };
+        }
+        // A human took the session and gave it back. The model asked for help and got it; the next turn
+        // re-observes and decides what the page now says — which is §8's discovery resume rule.
         return {
           call,
-          outcome: "escalated to a human",
+          outcome: "a human took over and handed the session back",
           entry: null,
-          ending: { kind: "escalated", reason: what, request: null },
+          ending: null,
           correction: null,
         };
       }
@@ -600,8 +639,35 @@ export async function runDiscovery(options: DiscoveryOptions): Promise<Discovery
       const targetKey = targetKeyOf(snapshot, decision.tool, decision.arguments);
       const reason = detector.observe({ tool: decision.tool, targetKey, state });
       if (reason !== null) {
-        history.push({ step: turn, tool: decision.tool, call, outcome: describeStuck(reason), failed: true });
-        return finish({ kind: "stuck", reason }, turn);
+        // §8's discovery half: a stuck verdict *raises* rather than ends. A person can usually clear in
+        // one action what the model cannot clear in five, and the plan's resume rule for discovery is
+        // "the agent re-observes current state and continues (its context includes the escalation
+        // record)" — so on a takeover the counters start again and the model decides afresh.
+        const described = describeStuck(reason);
+        await driver.log({ kind: "note", subject: "stuck", step: turn, message: described, tool: decision.tool });
+        const answer = await escalate({
+          code: "STUCK",
+          stepId: turn,
+          reason: `the run is not getting anywhere: ${described}`,
+          url: snapshot.url,
+          observed: `${call} left the page where it was`,
+          evidenceDir: driver.evidenceDir,
+        });
+        const outcome = answerOutcome(answer);
+        if (outcome === "took-over") {
+          detector.reset();
+          history.push({
+            step: turn,
+            tool: decision.tool,
+            call,
+            outcome: `a human took control and cleared it: ${described}`,
+            failed: false,
+          });
+          note(`turn ${turn}: a human took control — the run re-observes and continues (§8)`);
+          continue;
+        }
+        history.push({ step: turn, tool: decision.tool, call, outcome: described, failed: true });
+        return finish({ kind: "stuck", reason, escalation: outcome }, turn);
       }
     }
 
@@ -748,7 +814,9 @@ function describeNode(node: SnapshotNode): string {
 function endingFor(error: unknown): DiscoveryEnding | null {
   if (error instanceof PolicyBlockedError) return { kind: "blocked", verdict: error.verdict };
   if (error instanceof ApprovalRequiredError) {
-    return { kind: "escalated", reason: error.message, request: error.request };
+    // Reached when the *driver's* gate refused and the seam did not approve: either nobody answered or
+    // a person said no, and both end the run rather than letting the loop carry on around a refusal.
+    return { kind: "escalated", reason: error.message, request: error.request, escalation: "unavailable" };
   }
   return null;
 }

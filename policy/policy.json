@@ -46,7 +46,9 @@
     "waitForMs": 10000,
     "retries": 2,
     "backoffMs": [1000, 3000],
-    "escalationTimeoutMs": 600000
+    "escalationTimeoutMs": 600000,
+    "heartbeatMs": 2000,
+    "leaseTtlMs": 10000
   },
   "agent": {
     "maxToolCalls": 25,

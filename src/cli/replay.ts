@@ -31,6 +31,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { ControlBus, BusError } from "../control/bus.ts";
+import { Controller } from "../control/controller.ts";
 import { redactorFor, type Redactor } from "../policy/redact.ts";
 import type { Capability, Param } from "../schema/artifact.ts";
 import { CapabilityStore } from "../store/capability-store.ts";
@@ -40,14 +42,13 @@ import {
   identityEvidence,
   type IdentityEvidence,
 } from "../surface/identity.ts";
-import { SessionDriver } from "../surface/session-driver.ts";
+import { SessionDriver, type ApprovalHandler } from "../surface/session-driver.ts";
 import {
   StricterPolicy,
   crossCheckRisk,
-  noOperator,
   replaySeams,
+  replayState,
   runReplay as executeReplay,
-  type EscalationHandler,
   type RiskCrossCheck,
 } from "../replay/engine.ts";
 import {
@@ -325,27 +326,6 @@ export function driftVerdict(
 /* -------------------------------------------------------------------------- */
 
 /**
- * The escalation seam, narrated.
- *
- * P6 attaches the Controller and its control bus; until then a run that escalates is answered by
- * `noOperator` and stops. What this wrapper adds is only *saying so*: without it, an unexpected
- * dialog would end a run as `HUMAN_UNAVAILABLE` with nothing in the operator's terminal explaining
- * that the app had asked a question nobody was there to answer — and a failure whose cause is
- * invisible reads as a bug in the tool rather than as the truth about the run.
- */
-export function narratingEscalation(note: (line: string) => void): EscalationHandler {
-  return async (request) => {
-    // "at the entry" when there is no step: the entry navigation is not a step any artifact recorded,
-    // and "at step entry" reads as a step named entry rather than as "before step 1".
-    note(`escalation: ${request.code} at ${request.stepId === null ? "the entry" : `step ${request.stepId}`}`);
-    note(`  ${request.reason}`);
-    note(`  observed: ${request.observed}`);
-    note("  no operator is attached in this phase (P6 wires the control bus), so the run stops here");
-    return noOperator(request);
-  };
-}
-
-/**
  * `replay`, end to end. Returns §5.4's exit code: `0` success **or** business outcome, `1` a failure,
  * `2` a usage or preflight problem — the third decided before any of the first two can happen.
  */
@@ -424,26 +404,64 @@ export async function runReplay(argv: readonly string[], streams: Streams = PROC
   const runDir = join(evidenceRoot(), runId);
   const evidence: EvidenceRefs = { runDir, runLog: join(runDir, "run.jsonl") };
 
-  // The seams are built before the driver and the narration is bound after it, because the two depend
-  // on each other: the driver needs the approval handler, and the note writer needs the driver's run
-  // log. A late-bound reference is the honest fix rather than a reshuffle — an escalation cannot be
-  // raised before the run starts, so the binding is always in place by the time anything calls it.
-  let narrate: (line: string) => void = () => undefined;
-  const seams = replaySeams({ escalation: narratingEscalation((line) => narrate(line)) });
+  // §8's control wiring, in the order the dependencies actually run: the driver needs an approval
+  // handler, the handler needs the seams, the seams need the Controller, and the Controller needs the
+  // driver's surface and the note writer's log. The one late binding is the approval delegate, and it
+  // is honest rather than clever: nothing can ask for an approval before the run starts, so the
+  // delegate is always bound by the time anything calls it.
+  let approval: ApprovalHandler = async () => "denied";
+  // One state object, shared by §27's policy decorator (which asks which step is in flight) and by the
+  // seams (which set it). It has to exist before the driver, because the driver is constructed with the
+  // decorator.
+  const seamsState = replayState();
 
   const driver = await SessionDriver.launch({
     headless: !args.headed,
     evidenceDir: runDir,
-    policy: new StricterPolicy(policy, risk.gated, seams.state),
+    policy: new StricterPolicy(policy, risk.gated, seamsState),
     redactor,
     // The driver's own auto-wait is the step budget: a click that cannot find its target in the time
     // the step was given to prove itself has not failed for a different reason, and giving it a
     // second, longer timeout would make §5.2's `waitForMs` describe something other than the wait.
     actionTimeoutMs: policy.document.timing.waitForMs,
-    approval: seams.approval,
+    approval: (request) => approval(request),
   });
   const writer = noteWriter(driver.evidence, streams);
-  narrate = writer.note;
+
+  // The Controller is §8's token machine and the bus is how a second process reaches it. The run owns
+  // the browser, so the console is *always* a client — which is what makes the handoff structural
+  // rather than a convention two cooperating processes agree on (§3's diagram).
+  const controller = new Controller({
+    surface: driver,
+    timing: policy.document.timing,
+    stage: "replay",
+    runId: capability.id,
+    redactor,
+    onNote: writer.note,
+  });
+  let bus: ControlBus;
+  try {
+    bus = await ControlBus.listen({ controller, redactor, onNote: writer.note });
+  } catch (error: unknown) {
+    // A bus that cannot listen is a usage-level problem, not a run outcome: §5.4's exit 2, before the
+    // run has done anything. The browser is closed here because the run never starts.
+    await driver.close().catch(() => undefined);
+    streams.err(
+      describeUsageError("replay", {
+        ok: false,
+        problem: error instanceof BusError ? error.message : `the control bus could not start: ${String(error)}`,
+        fix: "set BUS_PORT to a free port (or stop whatever holds it) and re-run — §5.4's env knobs",
+      }),
+    );
+    return 2;
+  }
+  controller.busUrl = bus.url;
+
+  const seams = replaySeams({ escalation: (request) => controller.escalate(request) });
+  // §6's gate and §8's token meet here: while an operator holds the session, their own action **is** the
+  // approval — recorded as `actor: human` by the choke point — so the run never asks a human to approve
+  // a human. Every other gate goes to the escalation seam, which is what raises the request.
+  approval = async (request) => (controller.humanInControl ? "approved" : seams.approval(request));
 
   let result: RunResult;
   try {
@@ -471,6 +489,12 @@ export async function runReplay(argv: readonly string[], streams: Streams = PROC
       evidence,
     });
   } finally {
+    // The run is over, so nothing is waiting for a human any more: stop the lease clocks and stop
+    // listening. **A bus left open is a process that never exits** — `server.close()` is what releases
+    // the handle, and the failure mode is silent (the run prints its result and then hangs), which is
+    // why the two-process demo, not the in-process suite, is what caught it.
+    controller.close();
+    await bus.close().catch(() => undefined);
     await driver.close().catch(() => undefined);
     await writer.flush();
   }

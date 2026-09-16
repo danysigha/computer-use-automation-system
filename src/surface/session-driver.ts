@@ -45,7 +45,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Page } from "playwright";
 import type { Redactor } from "../policy/redact.ts";
-import { EvidenceLogger, type EvidenceLine } from "./evidence.ts";
+import { EvidenceLogger, type EvidenceActor, type EvidenceLine, type HumanChannel } from "./evidence.ts";
 import { Observer, type ObserverOptions, type RenderOptions, type Snapshot } from "./observer.ts";
 import {
   isCandidateRole,
@@ -127,7 +127,19 @@ export interface ApprovalRequest {
   readonly evidenceDir: string;
 }
 
-export type ApprovalDecision = "approved" | "denied";
+/**
+ * What an approver can answer, and the third one is P6's.
+ *
+ * `approved` and `denied` are the two §6 gives: the human's verdict on the action. `satisfied` is
+ * §8's resume rule reaching the one place it can still save a double-fire — **the step's
+ * postcondition already holds**, so the action must not be performed at all. It exists because an
+ * approval escalation happens *inside* `execute`: by the time the human has answered, they may have
+ * carried the step out themselves in the console (or the step may have completed while they looked),
+ * and performing the click on top of that is exactly the `1234512345` class of bug §8 pins. A second
+ * boolean beside `approved` would say the same thing in a shape a caller can misread; a third member
+ * cannot.
+ */
+export type ApprovalDecision = "approved" | "denied" | "satisfied";
 
 /**
  * The escalation seam. §8's Controller implements this in P6 — raise the request on the bus, lease
@@ -162,10 +174,24 @@ export interface ExecutedAction {
   readonly verdict: PolicyVerdict;
   /** Set for target-bearing actions; the chain that actually resolved, for the run log. */
   readonly resolved?: ResolvedTarget;
-  /** `granted` when a human said yes at the approval seam; `not-required` otherwise. */
-  readonly approval: "granted" | "not-required";
+  /**
+   * `granted` when a human said yes at the approval seam, `not-required` when policy allowed the
+   * action outright, and `satisfied` when the seam found the step's postcondition already holding —
+   * in which case the action was deliberately **not** performed (see `ApprovalDecision`).
+   */
+  readonly approval: "granted" | "not-required" | "satisfied";
   /** True when the action wrote into a field the redactor considers sensitive. */
   readonly sensitive: boolean;
+}
+
+/**
+ * Who is acting, for §3 key-3's control-transfer record. The driver stamps it on the lines it
+ * writes, because the driver is the only place every action passes through and therefore the only
+ * place the attribution can be made once rather than by each caller.
+ */
+export interface ExecuteOptions {
+  readonly actor?: EvidenceActor;
+  readonly channel?: HumanChannel;
 }
 
 /**
@@ -349,18 +375,21 @@ export class SessionDriver {
    * inside the choke point: a caller cannot receive an approval-gated verdict and act on it anyway,
    * because the only path to the page runs through the check.
    */
-  async execute(action: SurfaceAction): Promise<ExecutedAction> {
+  async execute(action: SurfaceAction, options: ExecuteOptions = {}): Promise<ExecutedAction> {
     if (action.kind === "navigate") {
       const context: ActionContext = { action, targetName: null, targetRole: null };
       const verdict = await this.#policy.review(context);
-      const approval = await this.#permit(verdict, context);
+      const approval = await this.#permit(verdict, context, options);
       // Cleared here, because both facts describe *this* navigation: a status or a failure from an
       // earlier one would otherwise outlive the page it happened on and be read against a navigation
       // that is still in flight (see `lastNavigationFailure`).
       this.#documentStatus.value = null;
       this.#documentFailure.value = null;
+      if (approval === "satisfied") {
+        return this.#record({ action, verdict, approval, sensitive: false }, options);
+      }
       await this.#page.goto(action.url, { waitUntil: "load" });
-      return this.#record({ action, verdict, approval, sensitive: false });
+      return this.#record({ action, verdict, approval, sensitive: false }, options);
     }
 
     const resolved = await resolveTarget(this.#page, action.target);
@@ -387,7 +416,7 @@ export class SessionDriver {
 
     let approval: ExecutedAction["approval"];
     try {
-      approval = await this.#permit(verdict, context);
+      approval = await this.#permit(verdict, context, options);
     } catch (error: unknown) {
       await resolved.element.dispose();
       throw error;
@@ -398,16 +427,23 @@ export class SessionDriver {
     const sensitive = action.kind === "type" && this.#redactor.matchesField(context.targetName);
     if (sensitive && action.kind === "type") this.#redactor.noteValue(action.value);
 
-    await this.#perform(action, resolved.element);
+    // The one arm that does not act: a seam that answered "the postcondition already holds" is
+    // telling the driver the work is done, and §8's rule is that a completed step is never performed
+    // again. Recorded like any other action, so the reason the click did not happen is on file.
+    if (approval !== "satisfied") await this.#perform(action, resolved.element);
     await resolved.element.dispose();
-    return this.#record({ action, verdict, resolved, approval, sensitive });
+    return this.#record({ action, verdict, resolved, approval, sensitive }, options);
   }
 
   /**
    * Enforce a verdict. Three outcomes, and the middle one is why this returns rather than throws:
    * an approval-gated action that a human approved proceeds and says so in the evidence.
    */
-  async #permit(verdict: PolicyVerdict, context: ActionContext): Promise<ExecutedAction["approval"]> {
+  async #permit(
+    verdict: PolicyVerdict,
+    context: ActionContext,
+    options: ExecuteOptions = {},
+  ): Promise<ExecutedAction["approval"]> {
     if (verdict.allowed) return "not-required";
 
     const request: ApprovalRequest = {
@@ -432,11 +468,24 @@ export class SessionDriver {
 
     if (!verdict.approvalRequired) throw new PolicyBlockedError(verdict);
 
-    const decision = this.#approval === undefined ? "unavailable" : await this.#approval(request);
+    const decision = this.#approval === undefined ? "denied" : await this.#approval(request);
+    if (decision === "satisfied") {
+      await this.#evidence.write({
+        kind: "decision",
+        // A satisfaction is a fact about the page, not a human's act — but it is only ever reached on
+        // a path a human was on, so the line carries the actor the caller was acting as.
+        actor: options.actor ?? "agent",
+        ...(options.channel === undefined ? {} : { channel: options.channel }),
+        decision: "satisfied",
+        rule: verdict.rule,
+        action: describeAction(context.action),
+      });
+      return "satisfied";
+    }
     if (decision !== "approved") {
       throw new ApprovalRequiredError(
         request,
-        decision === "unavailable"
+        decision === "denied" && this.#approval === undefined
           ? "no approval seam is wired, so nothing could approve it (§8's escalation arrives with the Controller)"
           : "the approver declined",
       );
@@ -453,12 +502,13 @@ export class SessionDriver {
   }
 
   /** Write the action line and return the executed record. Nothing reaches the page without one. */
-  async #record(executed: ExecutedAction): Promise<ExecutedAction> {
+  async #record(executed: ExecutedAction, options: ExecuteOptions = {}): Promise<ExecutedAction> {
     await this.#evidence.write({
       kind: "action",
-      actor: "agent",
+      actor: options.actor ?? "agent",
+      ...(options.channel === undefined ? {} : { channel: options.channel }),
       action: describeAction(executed.action),
-      outcome: "executed",
+      outcome: executed.approval === "satisfied" ? "already satisfied — not performed" : "executed",
       rule: executed.verdict.rule,
       approval: executed.approval,
       ...(executed.sensitive ? { sensitive: true } : {}),

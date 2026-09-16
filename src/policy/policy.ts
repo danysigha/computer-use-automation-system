@@ -55,12 +55,22 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /** The checked-in config. `POLICY_PATH` (env) or `--policy` (P5) points elsewhere. */
 export const DEFAULT_POLICY_PATH = resolve(HERE, "../../policy/policy.json");
 
-/** §6's `timing` section, as code defaults. `waitForMs` 10s, retries 2×, backoff 1s/3s. */
+/**
+ * §6's `timing` section, as code defaults. `waitForMs` 10s, retries 2×, backoff 1s/3s.
+ *
+ * `heartbeatMs` and `leaseTtlMs` are §8's escalation liveness, in the same section as every other
+ * clock in the system: the console must heartbeat every ~2s, and a lease nothing renews expires after
+ * ~10s, after which the human token auto-releases and the escalation re-raises. They are policy, not
+ * constants, for the reason §5.1 gives for the other waits — a test that had to spend ten real seconds
+ * to prove a lease expires would be a test nobody runs.
+ */
 export const DEFAULT_TIMING = {
   waitForMs: 10_000,
   retries: 2,
   backoffMs: [1_000, 3_000],
   escalationTimeoutMs: 600_000,
+  heartbeatMs: 2_000,
+  leaseTtlMs: 10_000,
 } as const;
 
 /** §6's `agent` section — the stuck-detector thresholds of §8. */
@@ -110,6 +120,8 @@ const timingSchema = z.strictObject({
   retries: z.number().int().min(0),
   backoffMs: z.array(z.number().int().min(0)),
   escalationTimeoutMs: z.number().int().min(0),
+  heartbeatMs: z.number().int().min(1),
+  leaseTtlMs: z.number().int().min(1),
 });
 
 const agentSchema = z.strictObject({

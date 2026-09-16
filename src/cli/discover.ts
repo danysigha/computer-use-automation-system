@@ -41,6 +41,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { agentConfig } from "../agent/config.ts";
 import { describeStuck } from "../agent/stuck.ts";
+import { ControlBus, BusError } from "../control/bus.ts";
+import { Controller } from "../control/controller.ts";
+import { approvalFor, type EscalationOutcome, type EscalationRequest } from "../control/escalation.ts";
 import { runDiscovery, type DiscoveryRun } from "../agent/loop.ts";
 import { openaiDriver } from "../agent/openai.ts";
 import { recordCapability } from "../agent/recorder.ts";
@@ -58,7 +61,7 @@ import {
   UNKNOWN_IDENTITY,
   type AppIdentity,
 } from "../surface/identity.ts";
-import { SessionDriver } from "../surface/session-driver.ts";
+import { SessionDriver, type ApprovalHandler } from "../surface/session-driver.ts";
 import {
   PROCESS_STREAMS,
   describeUsageError,
@@ -310,12 +313,17 @@ export async function runDiscover(argv: readonly string[], streams: Streams = PR
   const runId = new Date().toISOString().replaceAll(/[:.]/g, "-");
   const runDir = join(evidenceRoot(), runId);
 
+  // §8's control wiring, exactly as `replay` does it: the driver gets a delegate, the Controller gets
+  // the driver, the bus gets the Controller. Discovery escalates for a gated action *and* for a stuck
+  // verdict, and both arrive here.
+  let approval: ApprovalHandler = async () => "denied";
   const driver = await SessionDriver.launch({
     headless: !args.headed,
     evidenceDir: runDir,
     policy,
     redactor,
     actionTimeoutMs: policy.document.timing.waitForMs,
+    approval: (request) => approval(request),
   });
 
   // One writer, used by both the loop and `openai.ts`, so the run log is one ordered document. Both
@@ -323,6 +331,33 @@ export async function runDiscover(argv: readonly string[], streams: Streams = PR
   // scan and means a future caller that forgets cannot leak.
   const writer = noteWriter(driver.evidence, streams);
   writer.note(`discover: goal ${describeGoal(args.goal)}`);
+
+  const controller = new Controller({
+    surface: driver,
+    timing: policy.document.timing,
+    stage: "discovery",
+    runId: args.id ?? deriveId(args.goal, args.params),
+    redactor,
+    onNote: writer.note,
+  });
+  let bus: ControlBus;
+  try {
+    bus = await ControlBus.listen({ controller, redactor, onNote: writer.note });
+  } catch (error: unknown) {
+    await driver.close().catch(() => undefined);
+    streams.err(
+      describeUsageError("discover", {
+        ok: false,
+        problem: error instanceof BusError ? error.message : `the control bus could not start: ${String(error)}`,
+        fix: "set BUS_PORT to a free port (or stop whatever holds it) and re-run",
+      }),
+    );
+    return 2;
+  }
+  controller.busUrl = bus.url;
+  const escalate = (request: EscalationRequest) => controller.escalate(request);
+  approval = async (request) =>
+    controller.humanInControl ? "approved" : approvalFor(escalate, () => null)(request);
 
   let run: DiscoveryRun | null = null;
   let identity: AppIdentity = UNKNOWN_IDENTITY;
@@ -336,6 +371,7 @@ export async function runDiscover(argv: readonly string[], streams: Streams = PR
       screenshot: config.screenshot,
       entry,
       goal: args.goal,
+      escalation: escalate,
       onNote: writer.note,
     });
     // §26/§5.4: the marker is read from the live page *after* the run, because that is the surface
@@ -348,6 +384,8 @@ export async function runDiscover(argv: readonly string[], streams: Streams = PR
     // harness rather than a state of the app — reported as such, with the evidence that has it.
     crashed = error instanceof Error ? error : new Error(String(error));
   } finally {
+    controller.close();
+    await bus.close().catch(() => undefined);
     await driver.close().catch(() => undefined);
     await writer.flush();
   }
@@ -362,7 +400,19 @@ export async function runDiscover(argv: readonly string[], streams: Streams = PR
           observed: crashed?.message ?? "the run ended without a result",
           evidence,
         })
-      : await assemble({ run, args, policy, redactor, evidence, runId, identity, writer, streams });
+      : await assemble({
+          run,
+          args,
+          policy,
+          redactor,
+          evidence,
+          runId,
+          identity,
+          writer,
+          streams,
+          // §9/T14: a run that received in-flow human state changes may not emit an artifact.
+          humanActions: controller.humanActions,
+        });
 
   await writeSummary(redactor, runDir, { runId, args, entry, model: config.model, identity, run, result });
   await writer.flush();
@@ -390,10 +440,21 @@ async function assemble(input: {
   readonly identity: AppIdentity;
   readonly writer: NoteWriter;
   readonly streams: Streams;
+  /** Console actions this run carried out. Any at all is §9's "human help" case. */
+  readonly humanActions: number;
 }): Promise<RunResult> {
-  const { run, args, policy, redactor, evidence, identity, streams } = input;
+  const { run, args, policy, redactor, evidence, identity, streams, humanActions } = input;
 
   if (run.ending.kind !== "completed") return failureFor(run, evidence);
+
+  const humanAssisted = humanAssistedRefusal(humanActions, evidence);
+  if (humanAssisted !== null) {
+    input.writer.note(
+      `refusing to emit an artifact: this run received ${humanActions} in-flow human action(s) — ` +
+        "re-derive it in a fresh autonomous run (§9)",
+    );
+    return humanAssisted;
+  }
 
   const outputs = run.ending.outputs;
   try {
@@ -448,6 +509,33 @@ async function assemble(input: {
   }
 }
 
+/**
+ * §9/T14's artifact rule: **a run that received in-flow human state changes emits no artifact**.
+ *
+ * The reason it is a refusal rather than a note is provenance. An artifact's steps are read off the
+ * run's trace, and the trace is what the *model* did; a human's console actions travel the same choke
+ * point and are logged with `actor: human`, but they are deliberately not trace entries. So an artifact
+ * built from such a run would encode a flow no autonomous run performed — replay would fail on the step
+ * nobody can reproduce — and the honest output is the refusal plus the evidence, with "re-derive it
+ * autonomously" as the fix.
+ *
+ * A function rather than three lines inside `assemble`, because the *rule* is what a reviewer reads and
+ * what a test should be able to state without an API key, a model, or a store.
+ */
+export function humanAssistedRefusal(humanActions: number, evidence: EvidenceRefs): RunResult | null {
+  if (humanActions <= 0) return null;
+  return failureResult({
+    stage: "discovery",
+    errorCode: "HUMAN_ASSISTED",
+    expected: "the run reaches the goal without a human changing the page in flow",
+    observed:
+      `the run completed, but ${humanActions} action(s) came from an operator console — the artifact ` +
+      "would record a flow nobody can replay autonomously",
+    evidence,
+    escalation: "human-took-over",
+  });
+}
+
 /** §5.2's discovery-stage classification: what the run's ending means as a `RunResult`. */
 export function failureFor(run: DiscoveryRun, evidence: EvidenceRefs): RunResult {
   const ending = run.ending;
@@ -461,6 +549,10 @@ export function failureFor(run: DiscoveryRun, evidence: EvidenceRefs): RunResult
         expected: "the goal is reached within the agent budgets (§8)",
         observed: describeStuck(ending.reason),
         evidence,
+        // §8: whether the run asked a human, and what came of it. "Nobody was there" and "a person
+        // looked and could not help either" are different findings about the capability, and the
+        // run's own ending is the only place that distinction survives.
+        escalation: escalationOf(ending.escalation),
       });
     case "gave-up":
       return failureResult({
@@ -477,6 +569,7 @@ export function failureFor(run: DiscoveryRun, evidence: EvidenceRefs): RunResult
         expected: "every action on the path is either permitted or needs no approval",
         observed: `the run needed a human decision: ${ending.reason}`,
         evidence,
+        escalation: escalationOf(ending.escalation),
       });
     case "blocked":
       return failureResult({
@@ -512,6 +605,26 @@ function describeIdentityBlock(identity: AppIdentity): string {
 }
 
 /** `Look up member…` as a display name: the goal, sentence-cased and clipped to one line. */
+/**
+ * §8's outcome, in §5.3's spelling.
+ *
+ * The two vocabularies are the same three facts with different names — the seam says `took-over`,
+ * the result contract says `human-took-over` — and the mapping belongs in one function rather than at
+ * each of the two call sites that need it.
+ */
+function escalationOf(outcome: EscalationOutcome | undefined): "none" | "human-took-over" | "declined" | "no-operator" {
+  switch (outcome) {
+    case "took-over":
+      return "human-took-over";
+    case "declined":
+      return "declined";
+    case "unavailable":
+      return "no-operator";
+    default:
+      return "none";
+  }
+}
+
 function titleFrom(goal: string): string {
   const flattened = goal.replaceAll(/\s+/g, " ").trim();
   const capped = flattened.length <= 70 ? flattened : `${flattened.slice(0, 70)}…`;

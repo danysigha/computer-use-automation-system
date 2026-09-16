@@ -578,7 +578,12 @@ interface CliRun {
 async function cli(argv: readonly string[]): Promise<CliRun> {
   const evidenceDir = await mkdtemp(join(tmpdir(), "atlas-evidence-"));
   const previous = process.env["EVIDENCE_DIR"];
+  const previousBus = process.env["BUS_PORT"];
   process.env["EVIDENCE_DIR"] = evidenceDir;
+  // §8's control bus binds a port for every replay run, and parallel test files would collide on the
+  // shipped 4517. `BUS_PORT=0` asks the kernel for a free one — the same env knob §5.4 documents, used
+  // here for the reason it exists: a machine running more than one thing at a time.
+  process.env["BUS_PORT"] = "0";
   const out: string[] = [];
   const err: string[] = [];
   const streams: Streams = { out: (text) => out.push(text), err: (text) => err.push(text) };
@@ -589,6 +594,8 @@ async function cli(argv: readonly string[]): Promise<CliRun> {
   } finally {
     if (previous === undefined) delete process.env["EVIDENCE_DIR"];
     else process.env["EVIDENCE_DIR"] = previous;
+    if (previousBus === undefined) delete process.env["BUS_PORT"];
+    else process.env["BUS_PORT"] = previousBus;
   }
 
   const runDirs = await readdir(evidenceDir).catch((): string[] => []);

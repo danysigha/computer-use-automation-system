@@ -19,6 +19,7 @@
  * Indices are 0-based and contiguous: `numbered[i].index === i`, so the number the model sees
  * in the digest is literally the argument it passes back.
  */
+import { createHash } from "node:crypto";
 import type { ElementHandle, Page } from "playwright";
 
 /** Roles that are actionable — the model may click/type/select them. */
@@ -286,6 +287,38 @@ export class Observer {
       out.push(`${pad(depth + 1)}… ${hidden.length} more row(s) hidden${range} — expand to view`);
     }
   }
+}
+
+/**
+ * §8's state hash: the url plus every numbered node's `role name text`, over the snapshot's own
+ * numbering.
+ *
+ * It lives here, beside the model it hashes, because **three** consumers now need it and they are two
+ * different layers: the discovery loop's stuck detector (§8's no-progress counter) and replay's resume
+ * decision (§8's "the state is unchanged from escalation"). Computing it in the agent layer would mean
+ * the engine importing the agent to ask a question about a snapshot — the coupling §3's "one observer
+ * model, three consumers" exists to prevent.
+ *
+ * It hashes the **model**, never a rendering: the digest string a model reads is size-capped and its
+ * rows elided (§24), so a page that grew past the cap would hash the same while genuinely changing —
+ * and the resume decision would call a moved page unchanged, which is the one mistake it must not
+ * make. Hashing the numbered nodes keeps the rule independent of a display policy, which is §24's own
+ * separation applied to one more consumer.
+ *
+ * Values are in the hash on purpose: a textbox's current value is part of the state, so typing into a
+ * field that then shows the typed value is progress, and typing into a field that swallows it is not.
+ * In P6 that same fact is what makes a *partial* human type visible to the resume decision at all.
+ */
+export function stateDigest(snapshot: Snapshot): string {
+  const parts = [snapshot.url];
+  for (const node of snapshot.numbered) {
+    // NUL-joined, not space-joined, because the fields are free text: `["a b", "c"]` and `["a", "b c"]`
+    // are different pages, and a separator a value can contain would hash them the same. Written as an
+    // escape rather than a literal byte so this file stays text — a raw NUL in a source file makes git
+    // call it binary and hides every diff of it.
+    parts.push(`${node.role}\u0000${node.name}\u0000${node.text}`);
+  }
+  return createHash("sha1").update(parts.join("\n")).digest("hex");
 }
 
 function pad(depth: number): string {

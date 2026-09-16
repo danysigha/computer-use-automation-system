@@ -14,7 +14,7 @@
  * the operator reading it is looking at two apps they cannot see from the terminal.
  */
 import { describe, expect, it } from "vitest";
-import { bindInputs, driftVerdict, narratingEscalation, parseArgs, type Args } from "../../src/cli/replay.ts";
+import { bindInputs, driftVerdict, parseArgs, type Args } from "../../src/cli/replay.ts";
 import type { Capability } from "../../src/schema/artifact.ts";
 import { identityEvidence } from "../../src/surface/identity.ts";
 import { validArtifact } from "../helpers/artifact.ts";
@@ -247,46 +247,5 @@ describe("the tenant-drift verdict", () => {
       identity: { product: "atlas-console", variant: "sunrise-cu", version: "0.1" },
     });
     expect(driftVerdict(identity, true).ok).toBe(true);
-  });
-});
-
-/* -------------------------------------------------------------------------- */
-/* The escalation seam                                                         */
-/* -------------------------------------------------------------------------- */
-
-describe("narrating an escalation", () => {
-  it("says what happened and why, then reports that nobody could answer", async () => {
-    const lines: string[] = [];
-    const handler = narratingEscalation((line) => lines.push(line));
-    const outcome = await handler({
-      code: "INTERSTITIAL_DIALOG",
-      stepId: 3,
-      reason: "policy does not know this dialog",
-      url: "http://localhost:4173/",
-      observed: '"Your session will expire"',
-      evidenceDir: "/tmp/run",
-    });
-
-    // Without this narration an unexpected dialog ends the run as `HUMAN_UNAVAILABLE` with nothing in
-    // the terminal explaining that the *app* asked a question — a failure whose cause is invisible
-    // reads as a bug in the tool rather than as the truth about the run.
-    expect(lines[0]).toBe("escalation: INTERSTITIAL_DIALOG at step 3");
-    expect(lines[1]).toBe("  policy does not know this dialog");
-    expect(lines[2]).toContain("observed:");
-    expect(lines.join("\n")).toContain("P6 wires the control bus");
-    expect(outcome).toBe("unavailable");
-  });
-
-  it("names the entry when the escalation happened before any step", async () => {
-    const lines: string[] = [];
-    await narratingEscalation((line) => lines.push(line))({
-      code: "SESSION_EXPIRED",
-      stepId: null,
-      reason: "a password field appeared",
-      url: "http://localhost:4173/login",
-      observed: "the page shows a login form",
-      evidenceDir: "/tmp/run",
-    });
-    expect(lines[0]).toBe("escalation: SESSION_EXPIRED at the entry");
   });
 });

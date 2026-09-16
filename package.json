@@ -12,6 +12,7 @@
     "app": "node sample-app/server.ts",
     "discover": "node src/cli/discover.ts",
     "replay": "node src/cli/replay.ts",
+    "operator": "node src/cli/operator.ts",
     "spike": "node scripts/spike.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

@@ -105,6 +105,18 @@ import {
 } from "../surface/session-driver.ts";
 import type { EvidenceLine } from "../surface/evidence.ts";
 import {
+  answerDetail,
+  answerOutcome as outcomeOf,
+  approvalFor,
+  noOperator,
+  type EscalationAnswer,
+  type EscalationCode,
+  type EscalationHandler,
+  type EscalationOutcome,
+  type EscalationRequest,
+  type TakeoverAnswer,
+} from "../control/escalation.ts";
+import {
   businessOutcomeResult,
   failureResult,
   successResult,
@@ -140,45 +152,35 @@ export const POLL_INTERVAL_MS = 100;
  */
 export const MAX_DIALOG_ACTIONS = 2;
 
+/**
+ * How many times one unit may hand control to a human and take it back before the run gives up.
+ *
+ * Not a resource limit — a bound on a *conversation*. §8's four-way decision re-escalates when the
+ * state moved in a way it cannot verify, and a page that keeps moving under human hands could ask
+ * forever; three exchanges is enough for the real shapes (the human resolves the condition, re-checks,
+ * resolves again) and turns the pathological one into an honest `UNEXPECTED_STATE` failure with the
+ * evidence of everything the humans did.
+ */
+export const MAX_HANDOFFS = 3;
+
 /* -------------------------------------------------------------------------- */
 /* The escalation seam (§8)                                                    */
 /* -------------------------------------------------------------------------- */
 
 /**
- * What a run asks a human, in replay's terms. §8's ControlBus payload arrives with P6; this is the
- * shape the engine needs today, and it is deliberately the same four facts either way — the
- * condition, the step, what the page showed, and where the evidence is.
+ * §8's escalation contract now lives in `control/escalation.ts` — the Controller is its other half in
+ * P6, and a contract with two implementers does not belong inside one of them. It is re-exported here
+ * because this file is where the engine's own callers (and P5's tests) have always imported it from.
  */
-export interface EscalationRequest {
-  readonly code: "INTERSTITIAL_DIALOG" | "SESSION_EXPIRED" | "APPROVAL_REQUIRED";
-  readonly stepId: number | null;
-  readonly reason: string;
-  readonly url: string;
-  readonly observed: string;
-  readonly evidenceDir: string;
-}
-
-/** §8's answer, in the three states §5.3's `escalation` field can spell. */
-export type EscalationOutcome =
-  /** A human took control. The engine re-probes rather than assuming the step was done. */
-  | "took-over"
-  /** A human said no. The run ends the same way an unanswered escalation does, but says why. */
-  | "declined"
-  /** Nobody could answer — the default when nothing is wired. */
-  | "unavailable";
-
-export type EscalationHandler = (request: EscalationRequest) => Promise<EscalationOutcome>;
-
-/**
- * The handler a run has when it has none: nothing can answer, so nothing does.
- *
- * It returns immediately rather than waiting out `escalationTimeoutMs`, and that is the whole point
- * of it existing in P5: the lease, the heartbeat and the timeout are the Controller's machinery
- * (P6), and a wait with nothing on the other end is a run that hangs for ten minutes to learn what it
- * already knew. §8's terminal is the same either way — `HUMAN_UNAVAILABLE`, `no-operator` — so the
- * honest default is to arrive at it now.
- */
-export const noOperator: EscalationHandler = async () => "unavailable";
+export { noOperator };
+export type {
+  EscalationAnswer,
+  EscalationCode,
+  EscalationHandler,
+  EscalationOutcome,
+  EscalationRequest,
+  TakeoverAnswer,
+};
 
 /**
  * The run state the seams share. Its one field the *policy* reads is `step`: §27 binds an artifact's
@@ -193,6 +195,29 @@ export interface ReplayState {
   escalation: EscalationOutcome | null;
   /** How many escalations this run raised, for the evidence and for tests. */
   count: number;
+  /**
+   * The last takeover's accounting, or `null` when the answer carried none (a plain string from a
+   * test handler).
+   *
+   * §8's resume rule and §25's carve-out both need facts only the human's own channel can supply —
+   * the state hash at each end of their control, and whether the console's log explains the
+   * difference — so the seam keeps the last takeover whole rather than flattening it to an outcome.
+   * One escalation at a time is the Controller's own rule, so "the last" is unambiguous.
+   */
+  takeover: TakeoverAnswer | null;
+  /**
+   * §8's double-fire guard, as a question the approval seam can ask: **does the step in flight
+   * already hold its postcondition?**
+   *
+   * It is set by the engine for the unit in flight (the engine owns the unit, the artifact's
+   * assertion and the driver). It matters twice in one approval: before a human is asked at all (a
+   * step whose checkpoint already holds is a completed step — §8: "completed steps are never
+   * re-executed blindly"), and after a takeover (the human may have carried the step out in the
+   * console). Both answers are "do not perform this action", which is what `"satisfied"` means.
+   */
+  postconditionHolds: (() => Promise<boolean>) | null;
+  /** Steps a human has already approved in this run: one decision per step, not one per action. */
+  readonly approved: Set<number>;
 }
 
 export interface ReplaySeams {
@@ -210,29 +235,67 @@ export interface ReplaySeams {
  * escalation's `took-over`/`declined`/`unavailable`, and only a human who actually took control
  * approves the action — a decline and a silence both mean the run does not act.
  */
-export function replaySeams(options: { readonly escalation?: EscalationHandler } = {}): ReplaySeams {
-  const state: ReplayState = { step: null, escalation: null, count: 0 };
+/**
+ * The run state the seams share, as a factory.
+ *
+ * Exported because §27's `StricterPolicy` decorator and the seams have to read the *same* object (the
+ * policy asks which step is in flight; the seams set it), and a caller that constructs the driver
+ * before it constructs the seams — the CLI does, because the controller needs the driver — has to be
+ * able to make the state first and hand it to both.
+ */
+export function replayState(): ReplayState {
+  return {
+    step: null,
+    escalation: null,
+    count: 0,
+    takeover: null,
+    postconditionHolds: null,
+    approved: new Set<number>(),
+  };
+}
+
+export function replaySeams(
+  options: { readonly escalation?: EscalationHandler; readonly state?: ReplayState } = {},
+): ReplaySeams {
+  const state: ReplayState = options.state ?? replayState();
   const ask = options.escalation ?? noOperator;
 
   const escalation: EscalationHandler = async (request) => {
     state.count += 1;
     const outcome = await ask(request);
-    state.escalation = outcome;
+    state.escalation = outcomeOf(outcome);
+    state.takeover = answerDetail(outcome);
     return outcome;
   };
 
+  // §6's policy gate asked of §8's escalation seam, through the mapping the discovery loop uses too
+  // (`approvalFor`), so the two runs cannot disagree about what a human's yes means.
+  const askApproval = approvalFor(escalation, () => state.step?.id ?? null);
+
   const approval: ApprovalHandler = async (request: ApprovalRequest) => {
-    const target = request.targetName === null ? "an unnamed target" : `"${request.targetName}"`;
-    return (await escalation({
-      code: "APPROVAL_REQUIRED",
-      stepId: state.step?.id ?? null,
-      reason: `policy gated this action (${request.verdict.rule}): ${request.verdict.reason}`,
-      url: request.url,
-      observed: `${request.action.kind} on ${target}`,
-      evidenceDir: request.evidenceDir,
-    })) === "took-over"
-      ? "approved"
-      : "denied";
+    const stepId = state.step?.id ?? null;
+
+    // §8's first double-fire check: a gated step whose checkpoint already holds is already done, and
+    // asking a human to approve an action that must not happen is worse than useless — it invites them
+    // to approve it.
+    if ((await state.postconditionHolds?.()) === true) return "satisfied";
+
+    // One human decision covers one step. A step that is re-executed after a handback (branch 2 of the
+    // four-way decision) hits the policy gate again, and asking the same human the same question twice
+    // in one run is noise that trains them to answer without reading.
+    if (stepId !== null && state.approved.has(stepId)) {
+      return "approved";
+    }
+
+    const decision = await askApproval(request);
+    if (decision !== "approved") return decision;
+    if (stepId !== null) state.approved.add(stepId);
+
+    // §8's second check, and the one that saves the double-fire: the human may have performed the step
+    // themselves in the console while they held the token. The postcondition is re-read *now*, after
+    // their control ended; if it holds, the driver must not perform the action on top.
+    if ((await state.postconditionHolds?.()) === true) return "satisfied";
+    return "approved";
   };
 
   return { escalation, approval, state };
@@ -309,6 +372,31 @@ function actionForStep(step: Extract<Step, { kind: "act" }>, params: Params): Su
       return { kind: "select", target, label: value };
     case "press":
       return { kind: "press", target, key: value };
+  }
+}
+
+/**
+ * Register, before the run starts, every literal the artifact is going to write into a field the policy
+ * calls sensitive.
+ *
+ * The driver registers a value when it *types* it (§6's scrubber follows the value), which is early
+ * enough for the action line but not for the lines the engine writes *before* the action: the step's
+ * own decision line describes it ("…then the field shows `123-45-6789`"), and a reviewer's evidence
+ * would then hold a taxpayer id in plain text that every other sink masks. So the values the run is
+ * about to handle are registered up front, from the same two facts the driver itself uses — the
+ * recorded target's name and `redactor.matchesField` — and the decision line is scrubbed like
+ * everything else.
+ *
+ * Only `type`/`select` literals can be judged this way (a `click` writes nothing), and only literals:
+ * a `{param}` is resolved to the caller's own value here, which is the value that would reach the page.
+ */
+function registerSensitiveLiterals(capability: Capability, params: Params, redactor: Redactor): void {
+  for (const step of capability.steps) {
+    if (step.kind !== "act") continue;
+    if (step.value === undefined) continue;
+    const { name } = recordedTarget(step);
+    if (!redactor.matchesField(name)) continue;
+    redactor.noteValue(bind(step.value, params));
   }
 }
 
@@ -502,6 +590,16 @@ type Poll =
       readonly code: string;
       readonly observed: string;
       readonly escalation: Escalation;
+    }
+  /**
+   * A human handed the session back. **Not** a pass, a failure or a retry: §8's resume rule says the
+   * engine re-verifies the interrupted step and decides, so the loop stops here and the decision is
+   * made by `decideResume` — which is where the four-way matrix lives, with the unit and the driver in
+   * hand rather than inside the poll.
+   */
+  | {
+      readonly kind: "handback";
+      readonly code: EscalationCode;
     };
 
 export async function runReplay(options: ReplayOptions): Promise<RunResult> {
@@ -509,6 +607,8 @@ export async function runReplay(options: ReplayOptions): Promise<RunResult> {
   const seams = options.seams ?? replaySeams();
   const evidence: EvidenceRefs = { runDir: driver.evidenceDir, runLog: driver.evidence.runLogPath };
   const note = options.onNote ?? ((): void => undefined);
+
+  registerSensitiveLiterals(capability, params, driver.redactor);
 
   const context: Context = {
     capability,
@@ -539,7 +639,8 @@ export async function runReplay(options: ReplayOptions): Promise<RunResult> {
 
   const outputs: Record<string, unknown> = {};
 
-  for (const unit of buildUnits(capability, options)) {
+  const units = buildUnits(capability, options);
+  for (const [position, unit] of units.entries()) {
     seams.state.step = unit.step;
     await context.log({
       kind: "decision",
@@ -549,7 +650,10 @@ export async function runReplay(options: ReplayOptions): Promise<RunResult> {
     });
     note(`step ${unit.id ?? "entry"}: ${unit.label}`);
 
-    const result = await runUnit(unit, context);
+    // The prior unit travels with the current one because §8's resume rule needs it: branch (2) of the
+    // four-way decision is "the precondition holds", and the precondition *is* the previous step's
+    // postcondition. Carrying the unit rather than a flag keeps the check on the artifact's own terms.
+    const result = await runUnit(unit, units[position - 1] ?? null, context);
     switch (result.kind) {
       case "done":
         if (result.output !== null) outputs[result.output.name] = result.output.value;
@@ -576,7 +680,33 @@ export async function runReplay(options: ReplayOptions): Promise<RunResult> {
     urlBefore: null,
   };
 
-  const final = await settle(successUnit, Date.now() + policy.document.timing.waitForMs, context);
+  // The success check can escalate too (the last page may raise a dialog a human has to answer), and a
+  // handback there is resolved the same way the step loop resolves one: re-verify, and only advance on
+  // a state the run can verify. There is no action to re-execute at this point, so branches (1) and (2)
+  // are the same thing here — settle again.
+  context.seams.state.postconditionHolds = () => postconditionHoldsOnce(successUnit, context);
+  let final: Poll;
+  let successHandoffs = 0;
+  try {
+    final = await settle(successUnit, Date.now() + policy.document.timing.waitForMs, context);
+    while (final.kind === "handback") {
+      successHandoffs += 1;
+      const decision =
+        successHandoffs > MAX_HANDOFFS
+          ? ({
+              kind: "fail",
+              code: "UNEXPECTED_STATE",
+              observed:
+                "the session was handed back repeatedly at the success check and the state could not be verified",
+              escalation: "human-took-over",
+            } as const)
+          : await decideResume(successUnit, { prior: units.at(-1) ?? null, url: options.entry }, context, final, 0);
+      if (decision.kind === "fail") return failureFrom(failedFromResume(successUnit, decision, params), evidence);
+      final = await settle(successUnit, Date.now() + policy.document.timing.waitForMs, context);
+    }
+  } finally {
+    context.seams.state.postconditionHolds = null;
+  }
   switch (final.kind) {
     case "passed":
       await context.log({ kind: "note", subject: "success", message: "the success condition holds" });
@@ -664,10 +794,24 @@ function expectationFor(step: Step, url: string): Expectation {
  * first answer, and the terminal for a spent budget is the detected condition's own code — never
  * promoted, never escalated (§22's pinned terminal).
  */
-async function runUnit(unit: Unit, context: Context): Promise<UnitResult> {
+async function runUnit(unit: Unit, prior: Unit | null, context: Context): Promise<UnitResult> {
+  // §8's precondition, captured before the unit acts: the prior step's postcondition, or — for the
+  // first unit — the URL the unit began on. It is the question branch (2) asks, and it has to be
+  // answered from what the run *knew* rather than from what it can reconstruct afterwards.
+  const precondition: Precondition = { prior, url: context.driver.page.url() };
+  // §8's double-fire guard, handed to the approval seam for as long as this unit is in flight.
+  context.seams.state.postconditionHolds = () => postconditionHoldsOnce(unit, context);
+  try {
+    return await runUnitAttempts(unit, precondition, context);
+  } finally {
+    context.seams.state.postconditionHolds = null;
+  }
+}
+
+/** One unit's attempt loop (§22's budget around it). See `runUnit` for the resume context. */
+async function runUnitAttempts(unit: Unit, precondition: Precondition, context: Context): Promise<UnitResult> {
   const { retries, backoffMs, waitForMs } = context.policy.document.timing;
   let pending: Classified | null = null;
-
   for (let attempt = 0; ; attempt += 1) {
     let issue = true;
     if (attempt > 0) {
@@ -685,6 +829,19 @@ async function runUnit(unit: Unit, context: Context): Promise<UnitResult> {
       );
       if (late.kind === "outcome") return { kind: "outcome", match: late.match };
       if (late.kind === "failed") return failedFromPoll(unit, late, context.params);
+      // A handback can arrive here too — the re-check is a settle, and a settle is where a dialog or a
+      // login screen is noticed. §8's decision is made exactly as it is on the main path; what differs
+      // is only where the loop goes next. Getting this wrong is the double-fire: falling through to
+      // "issue" without asking would perform the step again the moment an operator handed it back.
+      if (late.kind === "handback") {
+        const decision = await decideResume(unit, precondition, context, late, 0);
+        if (decision.kind === "fail") return failedFromResume(unit, decision, context.params);
+        if (decision.kind === "poll" && !unit.reads) {
+          context.note("  the step's postcondition holds after the handback — it is not repeated");
+          return { kind: "done", output: null };
+        }
+        // `reissue` — or a read that has to be read again — falls through to the perform below.
+      }
       // A read unit's "passed" is not "already done" — nothing was read — so it falls through to be
       // read now that the page is finally sane. Everything else is genuinely finished, and re-issuing
       // its action is the double-fire this check exists to prevent.
@@ -731,10 +888,36 @@ async function runUnit(unit: Unit, context: Context): Promise<UnitResult> {
         const performed = await performUnit(unit, context);
         if (performed.kind === "failed") return performed;
 
-        const poll = await settle(unit, Date.now() + waitForMs, context);
+        let poll = await settle(unit, Date.now() + waitForMs, context);
+        let output = performed.output;
+        let handoffs = 0;
+        while (poll.kind === "handback") {
+          handoffs += 1;
+          const decision =
+            handoffs > MAX_HANDOFFS
+              ? ({
+                  kind: "fail",
+                  code: "UNEXPECTED_STATE",
+                  observed:
+                    `the session was handed back ${handoffs} times on this step and it still could not be ` +
+                    "verified — the run stops rather than guessing (§8)",
+                  escalation: "human-took-over",
+                } as const)
+              : await decideResume(unit, precondition, context, poll, 0);
+          if (decision.kind === "fail") return failedFromResume(unit, decision, context.params);
+          if (decision.kind === "reissue") {
+            // Branch (2): the precondition still holds, so the step is performed again. For a `type`
+            // that is a fill/replace — the semantics that make a partial human value safe to correct
+            // instead of doubling it (§4.1, §8).
+            const again = await performUnit(unit, context);
+            if (again.kind === "failed") return again;
+            output = again.output;
+          }
+          poll = await settle(unit, Date.now() + waitForMs, context);
+        }
         switch (poll.kind) {
           case "passed":
-            return { kind: "done", output: performed.output };
+            return { kind: "done", output };
           case "outcome":
             return { kind: "outcome", match: poll.match };
           case "failed":
@@ -903,14 +1086,6 @@ interface SettleState {
    */
   navigationPending: boolean;
   dialogsAnswered: number;
-  /**
-   * A dialog a human was already asked about, and a login screen likewise. Both are re-probed after
-   * a take-over — the human may have dealt with it — and both are terminal when the same condition
-   * is *still* standing afterwards, which is what stops "escalate, resume, escalate, resume" from
-   * being an unbounded loop.
-   */
-  dialogEscalatedOver: string | null;
-  sessionEscalated: boolean;
 }
 
 /**
@@ -927,8 +1102,6 @@ async function settle(unit: Unit, deadline: number, context: Context): Promise<P
     everSettled: false,
     navigationPending: false,
     dialogsAnswered: 0,
-    dialogEscalatedOver: null,
-    sessionEscalated: false,
   };
 
   for (;;) {
@@ -972,15 +1145,12 @@ async function settle(unit: Unit, deadline: number, context: Context): Promise<P
           if (answered !== null) return answered;
           continue;
         }
-        state.dialogEscalatedOver = null;
-
         const expired = await context.driver.hasPasswordField().catch(() => false);
         if (expired) {
-          const answered = await handleSessionExpiry(unit, state, context);
+          const answered = await handleSessionExpiry(unit, context);
           if (answered !== null) return answered;
           continue;
         }
-        state.sessionEscalated = false;
 
         // A 5xx is a *response*, not a transport failure (§5.2), so it is TRANSIENT_ERROR and
         // retryable. Checked before the checkpoint: a page that answered unusably has not answered
@@ -1116,15 +1286,6 @@ async function handleDialog(
   state: SettleState,
   context: Context,
 ): Promise<Poll | null> {
-  if (state.dialogEscalatedOver === dialog.text) {
-    return {
-      kind: "failed",
-      code: "INTERSTITIAL_DIALOG",
-      observed: `a human took over and the dialog is still standing: ${dialog.text}`,
-      escalation: "human-took-over",
-    };
-  }
-
   const known = matchRecoverableDialog(dialog.text, context.policy.document.recoverableDialogs);
   if (known !== null && dialog.control !== null) {
     if (state.dialogsAnswered >= MAX_DIALOG_ACTIONS) {
@@ -1160,7 +1321,7 @@ async function handleDialog(
     context.note("  the dialog is policy-known but has no control this run can address — asking a human");
   }
 
-  const outcome = await context.seams.escalation({
+  const answer = await context.seams.escalation({
     code: "INTERSTITIAL_DIALOG",
     stepId: unit.id,
     reason: unaddressable
@@ -1169,11 +1330,15 @@ async function handleDialog(
     url: context.driver.page.url(),
     observed: dialog.text,
     evidenceDir: context.evidence.runDir,
+    capabilityId: context.capability.id,
+    stage: "replay",
   });
 
+  const outcome = outcomeOf(answer);
   if (outcome === "took-over") {
-    state.dialogEscalatedOver = dialog.text;
-    return null;
+    // The human has handed control back. What that means for the step is §8's four-way decision, which
+    // needs the unit and the driver — so it is the caller's to make, not this poll's.
+    return { kind: "handback", code: "INTERSTITIAL_DIALOG" };
   }
   return {
     kind: "failed",
@@ -1191,18 +1356,9 @@ async function handleDialog(
  * notice, ask, and then *re-verify* rather than assume: the login page may as well have been a
  * redirect the engine misread.
  */
-async function handleSessionExpiry(unit: Unit, state: SettleState, context: Context): Promise<Poll | null> {
+async function handleSessionExpiry(unit: Unit, context: Context): Promise<Poll | null> {
   const here = context.driver.page.url();
-  if (state.sessionEscalated) {
-    return {
-      kind: "failed",
-      code: "SESSION_EXPIRED",
-      observed: `a human took over and the login screen is still standing at ${here}`,
-      escalation: "human-took-over",
-    };
-  }
-
-  const outcome = await context.seams.escalation({
+  const answer = await context.seams.escalation({
     code: "SESSION_EXPIRED",
     stepId: unit.id,
     reason:
@@ -1211,11 +1367,13 @@ async function handleSessionExpiry(unit: Unit, state: SettleState, context: Cont
     url: here,
     observed: `a login form is showing at ${here}`,
     evidenceDir: context.evidence.runDir,
+    capabilityId: context.capability.id,
+    stage: "replay",
   });
 
+  const outcome = outcomeOf(answer);
   if (outcome === "took-over") {
-    state.sessionEscalated = true;
-    return null;
+    return { kind: "handback", code: "SESSION_EXPIRED" };
   }
   return {
     kind: "failed",
@@ -1228,6 +1386,265 @@ async function handleSessionExpiry(unit: Unit, state: SettleState, context: Cont
 /* -------------------------------------------------------------------------- */
 /* Dressing a unit's ending as §5.3's contract                                 */
 /* -------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------- */
+/* §8's resume decision, after a handback                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The interrupted unit's precondition: the previous step's postcondition, or — for the first unit of
+ * a run — the URL the unit began on.
+ */
+interface Precondition {
+  readonly prior: Unit | null;
+  readonly url: string;
+}
+
+/**
+ * What the run does with the session it just got back. Three answers, because "re-escalate" is not a
+ * decision the caller can carry out — it is another round of asking, and `decideResume` keeps that
+ * conversation inside itself so the loop above only ever sees an ending it can act on.
+ */
+type ResumeDecision =
+  /** Branch (1): the step's postcondition holds — advance. */
+  | { readonly kind: "poll" }
+  /** Branch (2): the precondition holds — perform the step again. */
+  | { readonly kind: "reissue" }
+  /** Branch (3)/(4): nothing verifiable — stop, with everything the humans did in evidence. */
+  | { readonly kind: "fail"; readonly code: string; readonly observed: string; readonly escalation: Escalation };
+
+/** How many times one handback may re-ask before the unit ends as unverifiable. */
+export const MAX_RE_ESCALATIONS = 2;
+
+/**
+ * How long the resume decision waits for the page to show the step's postcondition before it concludes
+ * it does not hold.
+ *
+ * Not a retry budget: §22's rule that "a click whose response was merely slow is never clicked twice"
+ * applies here too — a handback lands on a page that may still be rendering the human's own action —
+ * and the cost of asking twice is a pause a person is already watching. Bounded by `waitForMs`, so a
+ * policy that shrank its waits does not grow a second, longer one here.
+ */
+const RESUME_SETTLE_MS = 2_000;
+
+/**
+ * §8's four-way resume decision, in the order §8 gives it.
+ *
+ * The ordering is the design, not a preference, and step 0 is what makes it safe:
+ *
+ * 0. **Is the condition that caused the escalation still standing?** A dialog still up, a login screen
+ *    still showing: the human handed back without dealing with the thing they were asked about, and
+ *    the run has been answered with silence. Re-executing the step would re-fire the action that
+ *    raised the dialog in the first place — the `1234512345` class of bug, on the submit button.
+ * 1. **The postcondition holds** → the human finished the step → advance (§25's carve-out: if nothing
+ *    in the console log accounts for the change, it is recorded as `channel: direct-session`).
+ * 2. **The precondition holds** → the step's entry state is intact and the action never landed →
+ *    re-execute it. `type` is a fill/replace, so a partial or wrong human value is *corrected* rather
+ *    than doubled.
+ * 3. **Partial progress** (the page moved, the outcome cannot be verified) → re-escalate with the
+ *    evidence, bounded by `MAX_RE_ESCALATIONS`.
+ * 4. **Neither** → fail with evidence: the run never guesses past a state it cannot verify.
+ */
+async function decideResume(
+  unit: Unit,
+  precondition: Precondition,
+  context: Context,
+  handback: Extract<Poll, { kind: "handback" }>,
+  reRaised: number,
+): Promise<ResumeDecision> {
+  const here = context.driver.page.url();
+  const takeover = context.seams.state.takeover;
+  const budget = Math.min(RESUME_SETTLE_MS, context.policy.document.timing.waitForMs);
+
+  // 0. The condition the human was asked about.
+  if (handback.code === "INTERSTITIAL_DIALOG") {
+    const dialog = await context.driver.findDialog().catch(() => null);
+    if (dialog !== null) {
+      return {
+        kind: "fail",
+        code: "INTERSTITIAL_DIALOG",
+        observed: `a human took over and the dialog is still standing: ${dialog.text}`,
+        escalation: "human-took-over",
+      };
+    }
+  }
+  if (handback.code === "SESSION_EXPIRED") {
+    const stillLogin = await context.driver.hasPasswordField().catch(() => false);
+    if (stillLogin) {
+      return {
+        kind: "fail",
+        code: "SESSION_EXPIRED",
+        observed: `a human took over and the login screen is still standing at ${here}`,
+        escalation: "human-took-over",
+      };
+    }
+  }
+
+  // 1. The human finished the step.
+  if (await holdsWithin(unit, context, budget)) {
+    await recordAttribution(takeover, unit, context);
+    await context.log({
+      kind: "decision",
+      subject: "resume",
+      stepId: unit.id,
+      decision: "advance",
+      rule: "resume.postcondition-holds",
+      observed: `${handback.code} escalation; ${unit.label} now holds`,
+    });
+    context.note("  the step's postcondition holds after the handback — advancing (§8 branch 1)");
+    return { kind: "poll" };
+  }
+
+  // 2. The step never landed: its entry state is intact, so performing it is the safe move.
+  if (await preconditionHolds(precondition, context, budget)) {
+    await context.log({
+      kind: "decision",
+      subject: "resume",
+      stepId: unit.id,
+      decision: "re-execute",
+      rule: "resume.precondition-holds",
+      observed: `${handback.code} escalation; ${unit.label}'s precondition still holds`,
+    });
+    context.note("  the precondition still holds — re-executing the step (§8 branch 2)");
+    return { kind: "reissue" };
+  }
+
+  // 3. Something moved, and it is not the step's outcome.
+  const partial = takeover !== null && takeover.atHandback !== takeover.atEscalation;
+  if (partial && reRaised < MAX_RE_ESCALATIONS) {
+    context.note("  the page moved but the outcome cannot be verified — asking a human again with the evidence (§8 branch 3)");
+    const answer = await context.seams.escalation({
+      code: handback.code,
+      stepId: unit.id,
+      reason:
+        "a human took control and the page moved, but the interrupted step's outcome cannot be verified — " +
+        "the state is neither the step's starting state nor its result, and the run does not guess (§8)",
+      url: context.driver.page.url(),
+      observed:
+        `the step's postcondition is not holding and its precondition no longer holds: ${unit.label}`,
+      evidenceDir: context.evidence.runDir,
+      capabilityId: context.capability.id,
+      stage: "replay",
+    });
+    const outcome = outcomeOf(answer);
+    if (outcome !== "took-over") {
+      return {
+        kind: "fail",
+        code: handback.code,
+        observed: `the interrupted step could not be verified and the human's answer was ${outcome}`,
+        escalation: escalationName(outcome),
+      };
+    }
+    return decideResume(unit, precondition, context, handback, reRaised + 1);
+  }
+
+  return {
+    kind: "fail",
+    code: "UNEXPECTED_STATE",
+    observed:
+      `a human took control of the session and the interrupted step (${unit.label}) is neither done nor ` +
+      "at its starting state, so the run cannot verify it (§8 branch 4)",
+    escalation: "human-took-over",
+  };
+}
+
+/** Does the prior step's postcondition — this unit's precondition — still hold? */
+async function preconditionHolds(precondition: Precondition, context: Context, budgetMs: number): Promise<boolean> {
+  // The first unit of a run has no prior step to ask, so the verifiable precondition is the one §8's
+  // own wording names for it: the page the unit was about to act on has not moved.
+  if (precondition.prior === null) return context.driver.page.url() === precondition.url;
+  return holdsWithin(precondition.prior, context, budgetMs);
+}
+
+/** A unit's postcondition, polled briefly. See `RESUME_SETTLE_MS` for why it is polled at all. */
+async function holdsWithin(unit: Unit, context: Context, budgetMs: number): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    if (await postconditionHoldsOnce(unit, context)) return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+
+/**
+ * One evaluation of the unit's own expectation — the cheap half of the two checks above, and the one
+ * the approval seam is handed as `ReplayState.postconditionHolds` (§8's double-fire guard).
+ */
+async function postconditionHoldsOnce(unit: Unit, context: Context): Promise<boolean> {
+  if (unit.expectation.kind === "navigated" && unit.urlBefore === null) {
+    // A navigation unit whose `goto` already resolved has discharged its own URL comparison; the
+    // postcondition left to re-verify is the one a handback could actually have broken — that the
+    // browser is still on the page that navigation went to.
+    return sameRoute(context.driver.page.url(), unit.expectation.url);
+  }
+  const state: SettleState = {
+    streak: null,
+    lastObserved: "the page showed nothing this step's expectation describes",
+    everSettled: false,
+    navigationPending: false,
+    dialogsAnswered: 0,
+  };
+  const poll = await (unit.expectation.kind === "settled"
+    ? Promise.resolve<Poll | null>({ kind: "passed" })
+    : checkExpectation(unit, state, context).catch(() => null));
+  return poll?.kind === "passed";
+}
+
+/** Two URLs on the same path, ignoring the origin's spelling and any query difference. */
+function sameRoute(left: string, right: string): boolean {
+  try {
+    const a = new URL(left);
+    const b = new URL(right);
+    return a.pathname === b.pathname;
+  } catch {
+    return left === right;
+  }
+}
+
+/**
+ * §25's carve-out: the postcondition holds, but did a *console action* put it there?
+ *
+ * A change the console's own log accounts for needs nothing further — the actions are already in
+ * `run.jsonl` as `actor: human, channel: console`. A change nothing accounts for is still a verified
+ * state (so the run advances), but its cause was a path outside the choke point, and §25's whole point
+ * is that the audit trail names it instead of flattening it.
+ */
+async function recordAttribution(takeover: TakeoverAnswer | null, unit: Unit, context: Context): Promise<void> {
+  if (takeover === null) return;
+  if (takeover.atHandback === takeover.atEscalation) return;
+  if (takeover.accounted) return;
+  await context.log({
+    kind: "note",
+    actor: "human",
+    channel: "direct-session",
+    subject: "attribution",
+    stepId: unit.id,
+    message:
+      "the page changed while a human held the session and no console action accounts for it — a change " +
+      "made directly in the session, outside the choke point (§25). The state is verified; its cause is not",
+    atEscalation: takeover.atEscalation,
+    atHandback: takeover.atHandback,
+  });
+  context.note(
+    "  the postcondition holds but no console action accounts for it — recorded as actor: human, " +
+      "channel: direct-session (§25)",
+  );
+}
+
+function failedFromResume(
+  unit: Unit,
+  decision: Extract<ResumeDecision, { kind: "fail" }>,
+  params: Params,
+): UnitFailure {
+  return {
+    kind: "failed",
+    code: decision.code,
+    expected: expectedFor(unit, params),
+    observed: decision.observed,
+    escalation: decision.escalation,
+    stepId: unit.id,
+  };
+}
 
 /**
  * §5.3's `expected`, in the artifact's own terms.
