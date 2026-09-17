@@ -105,19 +105,23 @@ the recorder's binding log, the review pass, and a saved artifact:
   review: declared 3 outcome signature(s) — NO_SUCH_ENTITY, RECORD_LOCKED, PERMISSION_DENIED
 saved: <repo>/capabilities/member-savings-balance/v2/artifact.json
 success
+  currentSavingsBalance: 4201.55
 ```
 
 That block is an excerpt, and the lines the ellipsis stands for are the model-driven part: the model's
 wording, and the recorder's translation of it, vary from run to run (`recorder: the model named an
 output "current savings balance", which the artifact calls "currentSavingsBalance"` is a real line from
-one run). The shape (binding log, review pass, save) does not vary.
+one run). The shape (binding log, review pass, save) does not vary, and the name in that last line
+always matches the artifact's, whatever the model called the value: the model's own words reach the
+reviewer through the warning, and every name a caller sees comes from the artifact.
 
 Replay it with a different member id and the same artifact still works, which is the parameterization
-claim, not a demonstration of memorisation (`--version` picks which recording replays; without it you
-get the `latest` pointer, which your v2 just moved):
+claim, not a demonstration of memorisation. This one names `--version 1` so it replays the recording
+that ships with the repo, which is the one the transcript below shows. The linked evidence replayed the
+same one; its `COMMAND.md` just names no version, because it ran while `latest` still meant v1:
 
 ```sh
-npm run replay -- member-savings-balance --memberId 12347
+npm run replay -- member-savings-balance --version 1 --memberId 12347
 # …
 #   step 2: click role=button[name="Search"] +1 fallback(s) then the URL contains "/search?memberId=12347"
 #   step 3: read text="$4,201.55" +2 fallback(s) as output "savingsBalance"
@@ -136,6 +140,10 @@ Two honest limits: discovery costs **cents per run** (~4–9 turns against local
 also immutable: `discover` writes a version once, and preflight refuses an `--id`/`--version` that is
 already recorded rather than letting the run find out at its last line. So re-recording means a new
 `--version`, a new `--id`, or deliberately moving the old version directory aside.
+
+Recording a version moves the `latest` pointer, so from here on a plain
+`npm run replay -- member-savings-balance` replays *your* v2 (with the output name your run produced)
+and not the shipped v1 that the examples above show. `--version 1` pins the shipped one.
 
 ---
 
