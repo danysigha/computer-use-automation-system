@@ -874,6 +874,9 @@ describe("the operator console", () => {
     const session = printed.join("\n");
     expect(session).toContain("escalation INTERSTITIAL_DIALOG");
     expect(session).toContain("you hold the session");
+    // The console says where input goes, because a headed window and the screenshot viewer both look
+    // like places to act and neither is one (§25 detects a click in the window; saying so is cheaper).
+    expect(session).toContain("typed at this prompt");
     expect(session).toMatch(/you ran click \[\d+\] through the choke point/);
     expect(session).toContain("control handed back");
   });

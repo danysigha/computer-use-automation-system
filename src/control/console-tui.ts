@@ -218,6 +218,8 @@ export function renderState(state: ConsoleState, note?: string): string {
 }
 
 export const COMMAND_HELP = [
+  "  everything here is typed at this prompt — a browser window or a screenshot viewer is a view of the session, not an input to it",
+  "",
   "  <idx> click            click the node the dump numbers <idx>",
   "  <idx> type <text>      replace the field's contents with <text> (never appended)",
   "  <idx> press <key>      press a key on a node, e.g. `3 press Enter`",
@@ -266,6 +268,12 @@ export class OperatorConsole {
     this.#options.io.out(COMMAND_HELP);
     // §24 nit 3: the escalation's screenshot is *rendered*, not merely carried.
     if ("path" in acquired.state.escalation.screenshot) {
+      // Named before it opens, because the viewer's window is a picture of the page in the same way the
+      // dump below is a description of it: a person who mistakes it for the session will click the wrong
+      // window, and §25 detects that but the cheaper fix is to say which window this is.
+      this.#options.io.out(
+        `operator: opening the escalation screenshot in your image viewer — ${acquired.state.escalation.screenshot.path}`,
+      );
       this.#options.io.openFile(acquired.state.escalation.screenshot.path);
     }
 
