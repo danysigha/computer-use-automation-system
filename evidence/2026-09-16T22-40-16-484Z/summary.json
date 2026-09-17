@@ -6,7 +6,7 @@
     "memberId": "99999"
   },
   "entry": "http://localhost:4173/",
-  "policy": "/Users/danysigha/Desktop/computer-use-automation-system/policy/policy.json",
+  "policy": "<repo>/policy/policy.json",
   "identity": {
     "expected": {
       "product": "atlas-console",

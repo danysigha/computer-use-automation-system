@@ -22,8 +22,8 @@
       "savings balance": "$4,201.55"
     },
     "evidence": {
-      "runDir": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-15T11-20-56-946Z",
-      "runLog": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-15T11-20-56-946Z/run.jsonl"
+      "runDir": "<repo>/evidence/2026-09-15T11-20-56-946Z",
+      "runLog": "<repo>/evidence/2026-09-15T11-20-56-946Z/run.jsonl"
     }
   }
 }

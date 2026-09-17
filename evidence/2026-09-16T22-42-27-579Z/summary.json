@@ -6,7 +6,7 @@
     "memberId": "12347"
   },
   "entry": "http://localhost:4173/",
-  "policy": "/Users/danysigha/Desktop/computer-use-automation-system/policy/policy.json",
+  "policy": "<repo>/policy/policy.json",
   "identity": {
     "expected": {
       "product": "atlas-console",
@@ -34,8 +34,8 @@
       "savingsBalance": 980.12
     },
     "evidence": {
-      "runDir": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-16T22-42-27-579Z",
-      "runLog": "/Users/danysigha/Desktop/computer-use-automation-system/evidence/2026-09-16T22-42-27-579Z/run.jsonl"
+      "runDir": "<repo>/evidence/2026-09-16T22-42-27-579Z",
+      "runLog": "<repo>/evidence/2026-09-16T22-42-27-579Z/run.jsonl"
     }
   }
 }
