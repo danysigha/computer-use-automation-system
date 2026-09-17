@@ -143,14 +143,17 @@ already recorded rather than letting the run find out at its last line. So re-re
 
 The interesting half of automation is what happens when the app does something nobody recorded. In
 this demo the confirmation POST raises a dialog whose text is **not** in the policy's
-`recoverableDialogs`, so the run pauses and asks for a human. `--headed` puts the browser on screen
-so you can watch the operator's click land in the same live session the run is driving: corroboration
-only, never a second control path, and never the default.
+`recoverableDialogs`, so the run pauses and asks for a human.
+
+Both commands below run headless, and **everything you do is typed at the console's `operator>`
+prompt**: the browser is not on screen and is never the thing you click. The console renders the run's
+own view of the page (same observer, same numbering the agent uses), and every action it takes is
+policy-checked and logged as `actor: human, channel: console`.
 
 **Terminal A**: the run, escalated and waiting:
 
 ```console
-$ npm run replay -- sub-account-open --memberId 12345 --entry 'http://localhost:4173/?sim=dialog=unexpected' --headed
+$ npm run replay -- sub-account-open --memberId 12345 --entry 'http://localhost:4173/?sim=dialog=unexpected'
 
   replay: sub-account-open vlatest — 8 step(s) from http://localhost:4173/?sim=dialog=unexpected
   …steps 1–6…
@@ -161,9 +164,8 @@ $ npm run replay -- sub-account-open --memberId 12345 --entry 'http://localhost:
     the escalation terminates by itself in 600s if nobody answers
 ```
 
-**Terminal B**: paste the printed nonce. The console renders the run's own view of the page (same
-observer, same numbering the agent uses), and everything it does is policy-checked and logged as
-`actor: human, channel: console`:
+**Terminal B**: paste the printed nonce. Everything from here on is typed at the `operator>` prompt,
+and the console says which of the windows on screen is which:
 
 ```console
 $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07ef56f5c6a43494 --bus http://127.0.0.1:4517
@@ -172,7 +174,8 @@ $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07
   why:        the app raised a dialog that policy does not list in `recoverableDialogs`, and the choice is a human one
   observed:   Workstation policy notice: verify teller session before continuing (ref WS-4471). OK
   run:        sub-account-open (replay)   evidence: <repo>/evidence/2026-09-16T22-40-25-611Z
-  terminates: 575s from now unless you answer
+  terminates: 575s from now unless you answer (§8)
+  screenshot: <repo>/evidence/2026-09-16T22-40-25-611Z/screenshots/01-escalation-interstitial-dialog.png
   token:      human   lease: 10s left of 10s (renewed every heartbeat)   your actions: 0
   you hold the session — the run is paused until you hand it back
   ── live view (indices are the agent's own numbering; `expand` shows the hidden rows) ──
@@ -203,6 +206,19 @@ $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07
   [16] link "OK"
   …run-log tail…
 
+  everything here is typed at this prompt — a browser window or a screenshot viewer is a view of the session, not an input to it
+
+  <idx> click            click the node the dump numbers <idx>
+  <idx> type <text>      replace the field's contents with <text> (never appended)
+  <idx> press <key>      press a key on a node, e.g. `3 press Enter`
+  expand [idx]           re-render the whole model unsummarized (spreads nothing)
+  refresh                poll the run again
+  shot                   open the current screenshot in the OS viewer
+  pass-control-back      hand the session back; the run re-verifies and continues
+  decline                end the run: a person said no
+  exit                   leave without handing back (the lease lapses, the run re-raises)
+operator: opening the escalation screenshot in your image viewer — <repo>/evidence/2026-09-16T22-40-25-611Z/screenshots/01-escalation-interstitial-dialog.png
+
 operator> 16 click
   you ran click [16] through the choke point (actor: human, channel: console)
     # Sub-Account Activated — Atlas Core Console — http://localhost:4173/member/12345/subaccount/done
@@ -210,6 +226,12 @@ operator> 16 click
 operator> pass-control-back
 operator: control handed back — the run re-verifies the page and continues
 ```
+
+Want the window on screen as well? Add `--headed` to terminal A. Do not click it: a visible window is
+physically clickable, and a click there never passes through the console. The run does notice, because
+the handback compares the page against the state the console's last action produced and records a
+change nothing in the console accounts for as `channel: direct-session` rather than quietly accepting
+it. That is a path the audit trail names rather than loses, but it is not the path this demo is about.
 
 …and terminal A finishes on its own, one step later:
 
@@ -225,6 +247,9 @@ success
 The run never re-issued the submit (a double submission would have been a real business action), and
 its `run.jsonl` records the human's click, the handback, and the resume decision that followed. The
 whole exchange is preserved in [`evidence/2026-09-16T22-40-25-611Z/`](evidence/2026-09-16T22-40-25-611Z/COMMAND.md).
+That recorded run is the one `--headed` run in the evidence set, so its `COMMAND.md` says `--headed`
+where the command above does not; the transcript is the same either way, since the window is a view of
+the session rather than an input to it.
 
 Worth knowing: if nobody answers, the escalation ends the run at `timing.escalationTimeoutMs`
 (default 10 min) as `HUMAN_UNAVAILABLE` rather than hanging, and the console's lease means a console
@@ -276,6 +301,7 @@ exists is refused by preflight), `--entry <url>`, `--json`, `--headed`.
 | Discovery: a provider error (401 / 429 / 5xx) mid-run | The run inherits it rather than hiding it: preflight checks that a key exists before launching, and an error during the loop ends the run as `DISCOVERY_FAILED` with the turns that did happen in `run.jsonl`, rather than retrying silently and forever |
 | Replay: `ELEMENT_NOT_FOUND` with a "page moved under the artifact" hint | The app changed under a recorded target. The artifact is meant to be reviewed: re-record, or fix the target chain |
 | Replay: `NAVIGATION_BLOCKED` | The URL/action is not on the policy allowlist. That is the guardrail working, not a bug |
+| Escalation: a browser window and an image viewer opened, and you are not sure where to type | At the `operator>` prompt. The viewer is a picture of the page and the window is only there if the run was launched `--headed`; a click in that window does not pass through the console, and is recorded as `channel: direct-session` (§25) rather than `channel: console` |
 
 Every failure carries a per-code `hint` line and the evidence paths, so the terminal answer and the
 `run.jsonl` next to it say the same thing.
