@@ -17,10 +17,11 @@
  *    browser check reads a path rather than launching anything), so there is nothing to be gained by
  *    stopping early and a first-run experience to be lost.
  *
- * 2. **The checks are injectable where the machine is not.** `nodeVersion` and `browserPath` are
- *    parameters with real defaults, because the alternative is a unit test that can only exercise the
- *    happy path — it cannot uninstall Node or delete Chromium. The failure arms are the ones worth
- *    testing, so they are the ones the seam makes reachable.
+ * 2. **The checks are injectable where the machine is not.** `nodeVersion`, `browserPath` and
+ *    `recordedVersions` are parameters with real defaults, because the alternative is a unit test that
+ *    can only exercise the happy path — it cannot uninstall Node, delete Chromium, or arrange for a
+ *    capability to already be recorded. The failure arms are the ones worth testing, so they are the
+ *    ones the seam makes reachable.
  *
  * 3. **Problem, cause, fix — in that order, in one object.** §5.4 asks each failure to print the exact
  *    fix. The policy's own origin check already produces the most valuable fix text in the system
@@ -37,6 +38,12 @@ import { existsSync } from "node:fs";
 import { chromium } from "playwright";
 import { describeValue } from "../agent/describe.ts";
 import { DEFAULT_POLICY_PATH, Policy, PolicyInvalidError } from "../policy/policy.ts";
+import {
+  CapabilityStore,
+  compareVersions,
+  isVersion,
+  normalizeVersion,
+} from "../store/capability-store.ts";
 import type { ActionContext } from "../surface/session-driver.ts";
 
 /**
@@ -87,6 +94,14 @@ export interface PreflightInput {
   readonly nodeVersion?: string;
   /** Injected by tests: `undefined` probes the machine, `null` means "no browser installed". */
   readonly browserPath?: string | null;
+  /**
+   * `discover` alone: the version directory this run would write. Undefined or `null` skips the check,
+   * which is what `replay` wants — `discover` is the only command that writes, so it is the only one
+   * that can collide with what is already recorded.
+   */
+  readonly reRecord?: { readonly id: string; readonly version: string } | null;
+  /** Injected by tests: the versions the store holds for an id. Defaults to the checked-in store. */
+  readonly recordedVersions?: (id: string) => Promise<readonly string[]>;
 }
 
 export type PreflightResult =
@@ -145,10 +160,71 @@ export async function preflight(input: PreflightInput): Promise<PreflightResult>
   if (input.command === "discover") {
     const keyProblem = keyIssue(input.env);
     if (keyProblem !== null) issues.push(keyProblem);
+
+    // The one check here that reads the store rather than the machine, and it belongs here for the
+    // reason this module exists: the id and the version are both settled before a browser launches, so
+    // a collision with what is already recorded is knowable *now* — while `save` only finds it at the
+    // end of a model-driven run, after the browser and the tokens have been paid for.
+    const reRecord = input.reRecord ?? null;
+    if (reRecord !== null) {
+      const recorded = await (input.recordedVersions ?? defaultRecordedVersions)(reRecord.id);
+      const collision = reRecordProblem(reRecord.id, reRecord.version, recorded);
+      if (collision !== null) issues.push(collision);
+    }
   }
 
   if (issues.length > 0 || policy === null || entry === null) return { ok: false, issues };
   return { ok: true, policy, policyPath, entry };
+}
+
+/**
+ * `discover` about to write a version the store already holds.
+ *
+ * A recorded version is immutable, and `CapabilityStore.save` enforces that — but it enforces it at
+ * the *save*, which is the last line of a discovery run: by then the browser has launched and the
+ * model has been paid for. §5.4 makes a setup problem a usage error decided before any of that, and
+ * this is one, so it is raised here instead of being discovered there.
+ *
+ * A function rather than a clause inside the branch above, so the wording is testable without a
+ * store, a temp directory or a run — the same reason `nodeVersionProblem` is one.
+ *
+ * Version equality is the store's own comparison, not string equality: `1` and `1.0.0` are one
+ * version to `save`, and a check that disagreed would pass here and be refused there.
+ */
+export function reRecordProblem(
+  id: string,
+  version: string,
+  existing: readonly string[],
+): PreflightIssue | null {
+  // `parseArgs` refuses a version that is not one long before this, and a preflight caller that
+  // reached here with garbage has a different problem than a collision.
+  if (!isVersion(version)) return null;
+  const clash = existing.find(
+    (candidate) => isVersion(candidate) && compareVersions(candidate, normalizeVersion(version)) === 0,
+  );
+  if (clash === undefined) return null;
+  return {
+    problem:
+      `capability "${id}" already has a recorded v${clash} at capabilities/${id}/v${clash}, and a ` +
+      "recorded version is immutable — this run would do all its work and then be refused at the save",
+    fix:
+      `record it as a new version (add \`--version ${nextVersion(existing)}\` — the recorded v${clash} ` +
+      `keeps replaying untouched), or name a new capability with \`--id <new-id>\``,
+  };
+}
+
+/** The next major above everything recorded, so the fix names a number rather than a gesture. */
+function nextVersion(existing: readonly string[]): string {
+  const majors = existing.map((candidate) => {
+    const match = /^(\d+)/.exec(normalizeVersion(candidate));
+    return match === null ? 1 : Number(match[1]);
+  });
+  return String(Math.max(1, ...majors) + 1);
+}
+
+/** What the checked-in store holds for an id — `[]` for one that was never recorded. */
+async function defaultRecordedVersions(id: string): Promise<readonly string[]> {
+  return new CapabilityStore().versions(id);
 }
 
 /**

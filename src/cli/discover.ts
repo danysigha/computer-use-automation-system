@@ -7,7 +7,7 @@
  * review pass, the store. Everything it calls was built to be called from here, and what is left is
  * the ordering — which is where the phase's real decisions are.
  *
- * **Five decisions shape it.**
+ * **Six decisions shape it.**
  *
  * 1. **Usage errors are decided before anything is loaded, and they exit `2`.** §5.4 makes that
  *    boundary hard: a bad flag, a malformed `--param`, a name the schema would refuse — each is
@@ -35,6 +35,14 @@
  *    goal — with the declared params' samples replaced by their placeholder names, so the derivation
  *    can never put a caller's value in a filename. The frozen grammar is a subset of what this
  *    accepts, which is the direction that cannot break a caller.
+ *
+ * 6. **`--version` says which recording to write, and an id/version the store already holds is
+ *    refused before the run.** §4.1's reserved flag set already names `version`, and `replay` reads it
+ *    to say which recording to *run*; `discover` hardcoding `v1` left the write half of that grammar
+ *    missing, so a reader re-recording a capability that ships with the repo had no way to say so and
+ *    a hand-moved directory was the only answer. The collision is decidable before a browser opens —
+ *    id and version are both settled by then — so it is a preflight problem, exit `2`, rather than the
+ *    last line of a run somebody paid for.
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -53,7 +61,7 @@ import { redactorFor, type Redactor } from "../policy/redact.ts";
 import type { Policy } from "../policy/policy.ts";
 import { isUsableName } from "../schema/artifact.ts";
 import { paramNameProblem } from "../schema/validate.ts";
-import { CapabilityStore } from "../store/capability-store.ts";
+import { CapabilityStore, isVersion } from "../store/capability-store.ts";
 import {
   ABSENT_IDENTITY,
   identityOf,
@@ -92,13 +100,14 @@ import {
  * (`capabilities/member-savings-balance/v1/`) and the one §9's recorder section writes
  * (`capabilities/<id>/v1/artifact.json`). Spelled `1` rather than `1.0.0`: the store treats the three
  * spellings as one version, and the directory it writes is named from this string, so the spelling
- * here is what an evaluator sees on disk.
+ * here is what an evaluator sees on disk. `--version` overrides it, which is how a capability that is
+ * already recorded gets recorded again instead of colliding.
  */
 const FIRST_VERSION = "1";
 
 /** §5.4's grammar, quoted in every usage error so a caller never has to find the docs. */
 const USAGE =
-  'npm run discover -- --goal "<natural-language goal>" [--param <name>=<value> …] [--entry <url>] [--id <capability-id>] [--headed] [--json]';
+  'npm run discover -- --goal "<natural-language goal>" [--param <name>=<value> …] [--entry <url>] [--id <capability-id>] [--version <semver>] [--headed] [--json]';
 
 /* -------------------------------------------------------------------------- */
 /* Arguments                                                                   */
@@ -111,6 +120,11 @@ export interface Args {
   /** `null` means "whatever the policy's allowlist says the default origin is" (§5.4). */
   readonly entry: string | null;
   readonly id: string | null;
+  /**
+   * The version this recording *becomes*, or `null` for `FIRST_VERSION`. Deliberately not `latest`,
+   * which `replay` accepts: there is nothing for a pointer to point at until this run saves.
+   */
+  readonly version: string | null;
   readonly headed: boolean;
   readonly json: boolean;
 }
@@ -130,6 +144,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let goal: string | null = null;
   let entry: string | null = null;
   let id: string | null = null;
+  let version: string | null = null;
   let headed = false;
   let json = false;
 
@@ -186,6 +201,21 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
         id = taken;
         break;
       }
+      case "--version": {
+        const taken = takeValue();
+        if (typeof taken !== "string") return taken;
+        // Checked here for the same reason `--id` is: a version the store would refuse is a usage
+        // error, and it is one the caller can fix in the command they are still typing.
+        if (!isVersion(taken)) {
+          return {
+            ok: false,
+            problem: `--version "${taken}" is not a version to record as`,
+            fix: "pass the version this recording becomes — e.g. --version 2, or --version 1.1.0",
+          };
+        }
+        version = taken;
+        break;
+      }
       case "--headed":
         headed = true;
         break;
@@ -220,7 +250,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     };
   }
 
-  return { ok: true, args: { goal, params, entry, id, headed, json } };
+  return { ok: true, args: { goal, params, entry, id, version, headed, json } };
 }
 
 /** `--param name=value`, with the name checked against the rule the artifact will apply. */
@@ -264,6 +294,7 @@ export function discoverCommandLine(args: Args): string {
   for (const param of args.params) parts.push("--param", shellArg(`${param.name}=${param.value}`));
   if (args.entry !== null) parts.push("--entry", shellArg(args.entry));
   if (args.id !== null) parts.push("--id", shellArg(args.id));
+  if (args.version !== null) parts.push("--version", shellArg(args.version));
   if (args.headed) parts.push("--headed");
   if (args.json) parts.push("--json");
   return parts.join(" ");
@@ -330,7 +361,15 @@ export async function runDiscover(argv: readonly string[], streams: Streams = PR
   // reads the same variable itself.
   loadDotenv();
 
-  const pre = await preflight({ command: "discover", entry: args.entry, env: process.env });
+  const pre = await preflight({
+    command: "discover",
+    entry: args.entry,
+    env: process.env,
+    // §5.4's boundary, applied to the one mistake only `discover` can make: this run's id and version
+    // are both settled already, so a collision with what the store holds is knowable before the
+    // browser opens rather than at the save, which is the last line of a paid run.
+    reRecord: { id: args.id ?? deriveId(args.goal, args.params), version: args.version ?? FIRST_VERSION },
+  });
   if (!pre.ok) {
     streams.err(`${describePreflightFailure(pre.issues)}\n`);
     return 2;
@@ -459,7 +498,7 @@ export async function runDiscover(argv: readonly string[], streams: Streams = PR
     notes: [
       "This command needs `OPENAI_API_KEY` (discovery is the one paid, model-driven step); replaying what it records does not.",
       "Discovery is model-driven, so re-running it is a *fresh recording*, not this one again: the model's choices, the recorded targets and the resulting artifact can all differ. The review pass is deterministic — it seeds the artifact's `outcomes[]` from `policy.json`'s curated vocabulary and stamps `reviewedBy: human` — so a re-run is reproducible in shape, not in bytes.",
-      `The recording lands in \`capabilities/${args.id ?? deriveId(args.goal, args.params)}/v1/artifact.json\` — the run log's own \`saved …\` line names the exact directory this run wrote.`,
+      `The recording lands in \`capabilities/${args.id ?? deriveId(args.goal, args.params)}/v${args.version ?? FIRST_VERSION}/artifact.json\` — the run log's own \`saved …\` line names the exact directory this run wrote.`,
       `The surface advertised \`${describeIdentityBlock(identity)}\` at the end of the run, which is what the artifact's \`app\` block is stamped with.`,
       ...environmentOverrides(),
       ...(exitCodeFor(result) === 0
@@ -537,7 +576,9 @@ async function assemble(input: {
     });
     for (const note of reviewed.notes) input.writer.note(note);
 
-    const saved = await new CapabilityStore().save(reviewed.capability, { version: FIRST_VERSION });
+    const saved = await new CapabilityStore().save(reviewed.capability, {
+      version: args.version ?? FIRST_VERSION,
+    });
     input.writer.note(`saved ${saved.id} v${saved.version} → ${saved.dir}`);
     streams.err(`saved: ${saved.artifactPath}\n`);
     // §6's precedence, once, for the values a caller receives: an output is masked when the artifact

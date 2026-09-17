@@ -25,6 +25,7 @@ import {
   describePreflightFailure,
   nodeVersionProblem,
   preflight,
+  reRecordProblem,
   type PreflightInput,
   type PreflightIssue,
 } from "../../src/cli/preflight.ts";
@@ -267,6 +268,99 @@ describe("the API key check", () => {
   it("is not required by replay, which is built not to need a model", async () => {
     const result = await preflight(healthy({ command: "replay", env: {} }));
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("the re-record check", () => {
+  /**
+   * The check that exists because a README following its own example used to spend a full model-driven
+   * run to learn something knowable before the browser opened. §5.4's boundary is the assertion: the
+   * refusal is a preflight issue, so the caller gets exit `2` and a fix instead of a `DISCOVERY_FAILED`
+   * at the end of a paid run.
+   */
+  it("refuses an id and version the store already holds, naming the fix", async () => {
+    const result = await preflight(
+      healthy({
+        reRecord: { id: "member-savings-balance", version: "1" },
+        recordedVersions: async () => ["1"],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(problems(result.issues)).toContain('capability "member-savings-balance" already has a recorded v1');
+    expect(problems(result.issues)).toContain("immutable");
+    expect(problems(result.issues)).toContain("capabilities/member-savings-balance/v1");
+    // The fix is a command, not advice — and it is the *next* version, so it can be pasted.
+    expect(fixes(result.issues)).toContain("--version 2");
+    expect(fixes(result.issues)).toContain("--id");
+  });
+
+  it("compares versions the way the store does, not the way strings do", async () => {
+    // `1` and `1.0.0` are one version to `save`. A check that compared strings would pass here and be
+    // refused at the save — which is precisely the failure this check exists to prevent.
+    const result = await preflight(
+      healthy({
+        reRecord: { id: "member-savings-balance", version: "1.0.0" },
+        recordedVersions: async () => ["1"],
+      }),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("says nothing about a version nobody has recorded", async () => {
+    const result = await preflight(
+      healthy({
+        reRecord: { id: "member-savings-balance", version: "2" },
+        recordedVersions: async () => ["1"],
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("says nothing about an id that was never recorded", async () => {
+    const result = await preflight(
+      healthy({
+        reRecord: { id: "member-mailing-address", version: "1" },
+        recordedVersions: async () => [],
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("suggests a version above everything recorded, not just above the clash", () => {
+    expect(reRecordProblem("x", "1", ["1", "2"])?.fix).toContain("--version 3");
+    expect(reRecordProblem("x", "2", ["1", "2"])?.fix).toContain("--version 3");
+    expect(reRecordProblem("x", "1.0.0", ["1.0.0"])?.fix).toContain("--version 2");
+  });
+
+  it("has nothing to say about a version the caller got wrong", () => {
+    // `parseArgs` refuses a non-version long before this, and a collision message would be the wrong
+    // explanation for it.
+    expect(reRecordProblem("x", "latest", ["1"])).toBeNull();
+  });
+
+  it("is discover's alone, because replay never writes", async () => {
+    const result = await preflight(
+      healthy({
+        command: "replay",
+        env: {},
+        reRecord: { id: "member-savings-balance", version: "1" },
+        recordedVersions: async () => ["1"],
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("reads the repo's own store when no seam was injected", async () => {
+    // The injected arms above are the ones with interesting wordings; this is the one that would fail
+    // if the default were wired to nothing, which no amount of injection would catch. It is asserted
+    // as "tracks the shipped artifact" rather than against a hard-coded yes, so a checkout without
+    // `capabilities/` says the honest thing instead of failing.
+    const result = await preflight(
+      healthy({ reRecord: { id: "member-savings-balance", version: "1" } }),
+    );
+    const shipped = existsSync(join(process.cwd(), "capabilities/member-savings-balance/v1/artifact.json"));
+    expect(result.ok).toBe(!shipped);
   });
 });
 

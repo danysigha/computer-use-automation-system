@@ -29,6 +29,9 @@ describe("parsing the grammar", () => {
     expect(parsed.params).toEqual([]);
     expect(parsed.entry).toBeNull();
     expect(parsed.id).toBeNull();
+    // `null` rather than a default: the version a run records as is `FIRST_VERSION` at the save, and
+    // the flag exists to *override* that, so "the caller named none" has to stay distinguishable.
+    expect(parsed.version).toBeNull();
     expect(parsed.headed).toBe(false);
     expect(parsed.json).toBe(false);
   });
@@ -43,6 +46,8 @@ describe("parsing the grammar", () => {
       "http://localhost:4173/",
       "--id",
       "member-savings-balance",
+      "--version",
+      "2",
       "--headed",
       "--json",
     ]);
@@ -50,6 +55,7 @@ describe("parsing the grammar", () => {
     expect(parsed.params).toEqual([{ name: "memberId", value: "12345" }]);
     expect(parsed.entry).toBe("http://localhost:4173/");
     expect(parsed.id).toBe("member-savings-balance");
+    expect(parsed.version).toBe("2");
     expect(parsed.headed).toBe(true);
     expect(parsed.json).toBe(true);
   });
@@ -81,6 +87,13 @@ describe("parsing the grammar", () => {
   it("accepts an empty value, which is a value a form can be given", () => {
     const parsed = args(["--goal", "g", "--param", "nickname="]);
     expect(parsed.params[0]).toEqual({ name: "nickname", value: "" });
+  });
+
+  it("takes the version spellings the store treats as one", () => {
+    // `discover` writes the string it is given, and `save` is what decides that `1`, `1.0` and `1.0.0`
+    // are one version. The parser's job is only to refuse what is not a version at all.
+    expect(args(["--goal", "g", "--version", "2"]).version).toBe("2");
+    expect(args(["--goal", "g", "--version", "1.1.0"]).version).toBe("1.1.0");
   });
 });
 
@@ -168,6 +181,19 @@ describe("usage errors", () => {
     expect(parsed.problem).toContain("Member Balance");
     expect(parsed.fix).toContain("--id member-savings-balance");
   });
+
+  it("refuses a --version that is not a version to record as", () => {
+    // `replay --version latest` is legitimate — it means "whatever is recorded". A *recording* has to
+    // name the version it becomes, so the one value that is right for one command is wrong for this
+    // one, and the fix says which spelling is wanted instead of leaving the caller to guess.
+    const parsed = parseArgs(["--goal", "g", "--version", "latest"]);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("latest");
+    expect(parsed.problem).toContain("record");
+    expect(parsed.fix).toContain("--version 2");
+  });
+
 });
 
 describe("the id a goal derives", () => {
