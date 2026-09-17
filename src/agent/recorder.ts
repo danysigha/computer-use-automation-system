@@ -129,6 +129,13 @@ export interface Recording {
   readonly capability: Capability;
   /** One line per thing the reviewer should look at. Recorded, never acted on silently. */
   readonly warnings: readonly string[];
+  /**
+   * The artifact's output name → the words the model used, which is the translation the *caller* needs
+   * as well as the reviewer: the value a run reports comes out of the model's own answer, while every
+   * name it is published under — the artifact, replay's outputs, a policy `redact.outputIds` entry —
+   * is the identifier. A caller keyed by anything else answers one capability in two vocabularies.
+   */
+  readonly outputs: ReadonlyMap<string, string>;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -215,7 +222,7 @@ export function recordCapability(options: RecordOptions): Recording {
   if (!checked.ok) {
     throw new CapabilityInvalidError(checked.issues, `the recording for "${options.id}"`);
   }
-  return { capability: checked.capability, warnings };
+  return { capability: checked.capability, warnings, outputs: named.labels };
 }
 
 /* -------------------------------------------------------------------------- */

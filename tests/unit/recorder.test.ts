@@ -354,11 +354,14 @@ describe("the model's words, as names an artifact can use", () => {
     // you read" and an illegal `Output.name`. The recorder translates rather than asking the model to
     // camel-case, and the rename is a warning because a reader comparing the artifact against the run
     // log should not have to guess that two different words are one value.
-    const { capability, warnings } = await record([entry(), read("$1,204.55")], {
+    const { capability, warnings, outputs } = await record([entry(), read("$1,204.55")], {
       "current savings balance": "$1,204.55",
     });
 
     expect(capability.outputs.map((output) => output.name)).toEqual(["currentSavingsBalance"]);
+    // The same reconciliation travels to the caller, which is where it earns its keep: the value a run
+    // reports came out of the model's own answer, and every name it is published under is the identifier.
+    expect(outputs.get("currentSavingsBalance")).toBe("current savings balance");
     expect(capability.steps.map((step) => (step.kind === "extract" ? step.name : ""))).toEqual([
       "currentSavingsBalance",
     ]);
@@ -367,8 +370,9 @@ describe("the model's words, as names an artifact can use", () => {
   });
 
   it("leaves a label that is already an identifier alone, and stays quiet about it", async () => {
-    const { capability, warnings } = await record([entry(), read("$1,204.55")], { balance: "$1,204.55" });
+    const { capability, warnings, outputs } = await record([entry(), read("$1,204.55")], { balance: "$1,204.55" });
     expect(capability.outputs.map((output) => output.name)).toEqual(["balance"]);
+    expect(outputs.get("balance")).toBe("balance");
     expect(warnings).toEqual([]);
   });
 

@@ -59,9 +59,10 @@ import { reviewCapability } from "../agent/review.ts";
 import { BindingLog, type ParamSample } from "../agent/canonicalize.ts";
 import { redactorFor, type Redactor } from "../policy/redact.ts";
 import type { Policy } from "../policy/policy.ts";
-import { isUsableName } from "../schema/artifact.ts";
+import { isUsableName, type Output } from "../schema/artifact.ts";
 import { paramNameProblem } from "../schema/validate.ts";
 import { CapabilityStore, isVersion } from "../store/capability-store.ts";
+import { parseMoney } from "../replay/step-runner.ts";
 import {
   ABSENT_IDENTITY,
   identityOf,
@@ -581,14 +582,14 @@ async function assemble(input: {
     });
     input.writer.note(`saved ${saved.id} v${saved.version} → ${saved.dir}`);
     streams.err(`saved: ${saved.artifactPath}\n`);
-    // §6's precedence, once, for the values a caller receives: an output is masked when the artifact
-    // declares it or policy names it. Doing it here rather than at the renderer means the human
-    // summary and the `--json` payload are the same masked object.
-    const declared = new Map(reviewed.capability.outputs.map((output) => [output.name, output.redact]));
-    const masked: Record<string, unknown> = {};
-    for (const [name, value] of Object.entries(outputs)) {
-      masked[name] = redactor.output(name, value, declared.get(name) ?? false).value;
-    }
+    // §6's precedence, once, for the values a caller receives — so the human summary and the `--json`
+    // payload are the same masked object. See `callerOutputs` for what "the same name" costs.
+    const masked = callerOutputs({
+      declared: reviewed.capability.outputs,
+      labels: recording.outputs,
+      read: outputs,
+      redactor,
+    });
     return successResult(masked, evidence);
   } catch (error: unknown) {
     // A completed run that could not be turned into an artifact. Reported as the failure it is —
@@ -601,6 +602,52 @@ async function assemble(input: {
       evidence,
     });
   }
+}
+
+/**
+ * The `outputs` object a caller receives: the last value a discovery run shapes, and the one that used
+ * to be three lines inline here.
+ *
+ * Both rules it follows were broken in the same way, by keying off the model's words instead of the
+ * artifact's name:
+ *
+ * - **The name is the artifact's.** The model answers in prose (`current savings balance`); the
+ *   artifact, replay, and any policy `redact.outputIds` entry call that value `currentSavingsBalance`.
+ *   Keyed by the label, discovery reported one capability's output under a name no other command
+ *   answers to, and a caller scripted against `--json` had to know which command it was talking to.
+ * - **The declaration is looked up by that same name.** The recorder stamps `redact: true` when the
+ *   artifact's name, the model's words *or* the field the value was read out of matches a policy
+ *   pattern; keyed by the label, the summary missed that stamp and printed the value replay masks.
+ *   §6's "an output is masked when the artifact declares it" failed on the one path that had no seam a
+ *   test could reach, which is why it is a function now.
+ *
+ * The value is normalized against the declared type for the same reason: the recorder types an output
+ * `money` only when the run's value matched its own money pattern, and replay reports such an output as
+ * a number — so echoing the model's `"$4,201.55"` here answered a different shape than replaying it did.
+ */
+export function callerOutputs(input: {
+  /** The artifact's declared outputs, in declaration order. */
+  readonly declared: readonly Output[];
+  /** The recorder's `name → the model's label` reconciliation (§28). */
+  readonly labels: ReadonlyMap<string, string>;
+  /** What the run reported, keyed by the label the model used. */
+  readonly read: Readonly<Record<string, string>>;
+  readonly redactor: Redactor;
+}): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const output of input.declared) {
+    // Falling back to the name keeps this total for an artifact this recorder did not write, where the
+    // label and the identifier are the same word.
+    const label = input.labels.get(output.name) ?? output.name;
+    const read = input.read[label] ?? input.read[output.name] ?? "";
+    // `parseMoney` is replay's parser, so a money output means one thing in both commands. It cannot
+    // fail for an output this recorder typed, since the type *is* the value matching `MONEY`; if it
+    // ever did, the value stays as it was read, because this runs after the save and a run that reached
+    // its goal should not be reported as a failure over the model's formatting.
+    const value = output.type === "money" ? (parseMoney(read) ?? read) : read;
+    values[output.name] = input.redactor.output(output.name, value, output.redact).value;
+  }
+  return values;
 }
 
 /**
