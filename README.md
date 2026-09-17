@@ -82,11 +82,18 @@ results page rather than only the home page.
 
 ## Record your own capability (needs `OPENAI_API_KEY`)
 
+Both capabilities in `capabilities/` ship with the repo, and a recorded version is immutable, so the
+command below asks for a **new version** of the shipped one. Re-using an `--id` and `--version` that
+already exist is refused by preflight, before a browser opens and before the model is paid for.
+
 ```sh
 cp .env.example .env      # then put your key in it
 npm run discover -- --goal "Look up member 12345 and read their current savings balance" \
-  --param memberId=12345 --id member-savings-balance
+  --param memberId=12345 --id member-savings-balance --version 2
 ```
+
+To record a capability that is not in the repo yet, give it a goal of your own and a fresh `--id`;
+`--version` only matters when you are re-recording one that already exists.
 
 You get a live turn-by-turn narration (`turn 1: type into [6]`, `turn 2: click [9] → url → …`), then
 the recorder's binding log, the review pass, and a saved artifact:
@@ -94,13 +101,20 @@ the recorder's binding log, the review pass, and a saved artifact:
 ```text
   binding: steps.0.value ← memberId (sample 12345)
   binding: steps.1.expect.urlContains ← memberId (sample 12345)
+  …
   review: declared 3 outcome signature(s) — NO_SUCH_ENTITY, RECORD_LOCKED, PERMISSION_DENIED
-saved: <repo>/capabilities/member-savings-balance/v1/artifact.json
+saved: <repo>/capabilities/member-savings-balance/v2/artifact.json
 success
 ```
 
+That block is an excerpt, and the lines the ellipsis stands for are the model-driven part: the model's
+wording, and the recorder's translation of it, vary from run to run (`recorder: the model named an
+output "current savings balance", which the artifact calls "currentSavingsBalance"` is a real line from
+one run). The shape (binding log, review pass, save) does not vary.
+
 Replay it with a different member id and the same artifact still works, which is the parameterization
-claim, not a demonstration of memorisation:
+claim, not a demonstration of memorisation (`--version` picks which recording replays; without it you
+get the `latest` pointer, which your v2 just moved):
 
 ```sh
 npm run replay -- member-savings-balance --memberId 12347
@@ -119,8 +133,9 @@ kept as evidence: [`evidence/2026-09-16T22-42-27-579Z/`](evidence/2026-09-16T22-
 
 Two honest limits: discovery costs **cents per run** (~4–9 turns against localhost), and it is
 **model-driven**: a re-run is a fresh recording, not a byte-identical repeat. A recorded version is
-also immutable: re-recording over `v1` is refused by the store, so record under a new `--id` (or move
-the version aside) rather than expecting the same path to be overwritten.
+also immutable: `discover` writes a version once, and preflight refuses an `--id`/`--version` that is
+already recorded rather than letting the run find out at its last line. So re-recording means a new
+`--version`, a new `--id`, or deliberately moving the old version directory aside.
 
 ---
 
@@ -243,6 +258,11 @@ artifact's own declarations before anything launches), `--entry <url>` (override
 still be on the allowlist), `--policy <file>`, `--allow-drift` (run against a target that advertises
 a different product/variant, recorded in evidence), `--json`, `--headed`.
 
+Discovery's flags: `--goal "<sentence>"` (required), `--param <name>=<value>` (one per declared input,
+in declaration order), `--id <capability-id>` (the store path; derived from the goal when absent),
+`--version <semver>` (the version this recording becomes; default `1`, and an id/version that already
+exists is refused by preflight), `--entry <url>`, `--json`, `--headed`.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -252,6 +272,7 @@ a different product/variant, recorded in evidence), `--json`, `--headed`.
 | `port 4173 is in use` | `PORT=4300 npm run app`, and make sure the same port is in the policy allowlist (preflight names the mismatch for you) |
 | `the target is not the app this artifact was recorded against` | You are pointing at a different build/variant. Re-record, or pass `--allow-drift` to attempt reuse knowingly |
 | Discovery: `OPENAI_API_KEY` is not set | Put the key in `.env` (see `.env.example`). Replay needs no key |
+| Discovery: `capability "…" already has a recorded v1 … a recorded version is immutable` | Preflight refused the re-recording before it started. Add `--version <next>` to record a new version, or pass a new `--id` to record a new capability |
 | Discovery: a provider error (401 / 429 / 5xx) mid-run | The run inherits it rather than hiding it: preflight checks that a key exists before launching, and an error during the loop ends the run as `DISCOVERY_FAILED` with the turns that did happen in `run.jsonl`, rather than retrying silently and forever |
 | Replay: `ELEMENT_NOT_FOUND` with a "page moved under the artifact" hint | The app changed under a recorded target. The artifact is meant to be reviewed: re-record, or fix the target chain |
 | Replay: `NAVIGATION_BLOCKED` | The URL/action is not on the policy allowlist. That is the guardrail working, not a bug |
