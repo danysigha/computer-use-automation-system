@@ -195,6 +195,71 @@ export interface ExecuteOptions {
 }
 
 /**
+ * A key name as a person types it, as the name Playwright knows it.
+ *
+ * `element.press` takes Playwright's own spelling — `Enter`, `Tab`, `ArrowDown`, `F5`, or a single
+ * character — and answers anything else with `Unknown key: "enter"`, which is a sentence about the
+ * library rather than about what the person at the console did. The console's help says
+ * `3 press Enter`, and that is not the spelling most people reach for: the operator of the escalation
+ * demo typed `16 press enter` and was refused by `elementHandle.press`.
+ *
+ * So the names a keyboard actually has are folded to Playwright's spelling here, at the one place keys
+ * reach the surface, and everything else passes through untouched: a single character, an already
+ * correct name, a code-based one (`KeyA`), a combination (`Control+a`). Nobody has to remember which of
+ * the two layers capitalizes what.
+ */
+export function normalizeKey(raw: string): string {
+  const trimmed = raw.trim();
+  const alias = KEY_ALIASES.get(trimmed.toLowerCase());
+  if (alias !== undefined) return alias;
+  const fn = /^f(\d{1,2})$/.exec(trimmed.toLowerCase());
+  return fn === null ? trimmed : `F${fn[1]}`;
+}
+
+/** The names people type that Playwright spells differently. Deliberately short; not a keymap. */
+const KEY_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["enter", "Enter"],
+  ["return", "Enter"],
+  ["tab", "Tab"],
+  ["esc", "Escape"],
+  ["escape", "Escape"],
+  ["space", "Space"],
+  ["spacebar", "Space"],
+  ["backspace", "Backspace"],
+  ["del", "Delete"],
+  ["delete", "Delete"],
+  ["insert", "Insert"],
+  ["up", "ArrowUp"],
+  ["down", "ArrowDown"],
+  ["left", "ArrowLeft"],
+  ["right", "ArrowRight"],
+  ["pageup", "PageUp"],
+  ["pagedown", "PageDown"],
+]);
+
+/** `element.press`, with an unknown key answered in the surface's words rather than Playwright's. */
+async function press(element: ElementHandle, key: string): Promise<void> {
+  try {
+    await element.press(key);
+  } catch (error: unknown) {
+    throw pressFailure(key, error);
+  }
+}
+
+/**
+ * Playwright's refusal, restated for whoever typed the key: the names it lists first are the ones a
+ * console session uses, and `Enter` leads because that is the one this message exists for.
+ */
+export function pressFailure(key: string, thrown: unknown): Error {
+  const message = thrown instanceof Error ? thrown.message : String(thrown);
+  if (!message.includes("Unknown key")) return thrown instanceof Error ? thrown : new Error(message);
+  return new Error(
+    `"${key}" is not a key name this run can press — use "Enter", "Tab", "Escape", "Backspace", ` +
+      '"ArrowUp"…, a function key like "F5", or a single character',
+  );
+}
+
+/**
  * A capture either happened or it was suppressed, and the caller has to be able to tell which: a
  * caller that treats a suppressed screenshot as a path will render a file that is not there.
  *
@@ -533,7 +598,7 @@ export class SessionDriver {
         await element.selectOption({ label: action.label });
         return;
       case "press":
-        await element.press(action.key);
+        await press(element, normalizeKey(action.key));
         return;
     }
   }

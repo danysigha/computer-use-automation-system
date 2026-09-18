@@ -881,6 +881,45 @@ describe("the operator console", () => {
     expect(session).toContain("control handed back");
   });
 
+  it("presses the key a person types, not the spelling the browser library wants", async () => {
+    // The demo's OK node is a link, and the operator who typed `16 press enter` — the natural spelling,
+    // against a help line that says `3 press Enter` — was refused by `elementHandle.press: Unknown key:
+    // "enter"`. The alias lives at the surface, so this case drives the whole chain the operator did:
+    // console line, bus, controller, driver, page, and then the resume decision that follows.
+    const run = await handoff({
+      capability: () => artifact(SHIPPED, "sub-account-open"),
+      entry: (base) => `${base}/?sim=dialog=unexpected`,
+    });
+    await until(() => run.controller.escalation, "an escalation to be raised");
+
+    const printed: string[] = [];
+    const script: string[] = [];
+    const console_ = new OperatorConsole({
+      bus: run.bus.url,
+      nonce: nonceOf(run.notes),
+      heartbeatMs: 250,
+      io: {
+        out: (text: string) => printed.push(text),
+        readLine: async () => {
+          const next = script.shift();
+          if (next !== undefined) return next;
+          const ok = /\[(\d+)]\s+link\s+"OK"/.exec(printed.join("\n"));
+          if (ok?.[1] === undefined) return null;
+          // Lowercase on purpose: this is the line the operator typed.
+          script.push("pass-control-back");
+          return `${ok[1]} press enter`;
+        },
+        openFile: () => undefined,
+      },
+    });
+    expect(await console_.run()).toBe(0);
+
+    expect((await run.result).status, printed.join("\n")).toBe("success");
+    const session = printed.join("\n");
+    expect(session).toMatch(/you ran press enter on \[\d+\] through the choke point/);
+    expect(session).not.toContain("Unknown key");
+  });
+
   it("parses §8's numbered grammar in both spellings", () => {
     expect(parseConsoleLine("3 click")).toMatchObject({ kind: "command", command: { kind: "click", index: 3 } });
     expect(parseConsoleLine("click 3")).toMatchObject({ kind: "command", command: { kind: "click", index: 3 } });
