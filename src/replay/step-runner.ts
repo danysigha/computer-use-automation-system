@@ -112,6 +112,27 @@ export function describeDescriptor(descriptor: TargetDescriptor): string {
   return rest === 0 ? `${describeCandidate(first)}${frame}` : `${describeCandidate(first)} +${rest} fallback(s)${frame}`;
 }
 
+/**
+ * The clause a *read* earns when a fallback candidate, rather than the one the step line named,
+ * produced the value — and nothing when the first candidate resolved, because then the step line was
+ * already true.
+ *
+ * The step line names the first candidate on purpose (§4.1's chain is walked in order, and the first
+ * one is how a reader recognizes the step), but for a read that line is the *intent* and the value is
+ * the *outcome*, and the canonical case separates them: a literal reading taken from another member's
+ * page is still in the chain, so `read text="$4,201.55"` sits above an answer of `980.12` with nothing
+ * in between saying which candidate won. The driver has always known; this is the sentence that says
+ * it, and it is a function here rather than a line in the engine so the wording is testable.
+ *
+ * `index` is `-1` only if the candidate cannot be placed in the chain it came from. That names the
+ * candidate without a position rather than staying quiet: the strategy is the useful half.
+ */
+export function describeResolution(candidate: TargetCandidate, index: number, total: number): string {
+  if (index === 0) return "";
+  const where = index < 0 ? "" : `candidate ${index + 1} of ${total}: `;
+  return ` via ${where}${describeCandidate(candidate)}`;
+}
+
 /** §5.3's `expected`, in a sentence a caller who has never read the artifact can act on. */
 export function describeAssertion(assertion: StateAssertion, params: Params): string {
   if ("urlContains" in assertion) return `the URL contains ${quote(bind(assertion.urlContains, params))}`;

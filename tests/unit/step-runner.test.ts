@@ -32,6 +32,7 @@ import {
   describeAssertion,
   describeCandidate,
   describeDescriptor,
+  describeResolution,
   describeStep,
   isRetryFamily,
   matchOutcome,
@@ -196,6 +197,29 @@ describe("describing a candidate chain", () => {
 
   it("says so when the chain is empty rather than rendering nothing", () => {
     expect(describeDescriptor({ candidates: [] })).toBe("an empty candidate chain");
+  });
+
+  it("says which candidate a read actually came from, when it was not the first", () => {
+    // The case this exists for: the step line names a literal read off another member's page, and the
+    // value came from the row-relative candidate behind it. Silence would leave the two statements
+    // looking like a contradiction.
+    const candidates = [
+      { strategy: "text" as const, text: "$4,201.55" },
+      {
+        strategy: "row-relative" as const,
+        row: { by: "cell-text" as const, text: "SAV" },
+        column: { by: "header-text" as const, text: "Balance" },
+        action: "cell" as const,
+      },
+      { strategy: "css" as const, selector: "td", index: 11 },
+    ];
+    expect(describeResolution(candidates[1]!, 1, candidates.length)).toBe(
+      ' via candidate 2 of 3: row-relative[row="SAV" → cell]',
+    );
+    // Nothing to say when the step line was already the truth.
+    expect(describeResolution(candidates[0]!, 0, candidates.length)).toBe("");
+    // A candidate that cannot be placed in the chain is still named: the strategy is the useful half.
+    expect(describeResolution(candidates[2]!, -1, candidates.length)).toBe(' via css="td"[11]');
   });
 });
 

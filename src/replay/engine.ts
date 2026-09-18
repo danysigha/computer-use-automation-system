@@ -135,6 +135,7 @@ import {
   matchOutcome,
   matchRecoverableDialog,
   parseMoney,
+  describeResolution,
   type Classified,
   type OutcomeMatch,
   type Params,
@@ -1011,6 +1012,12 @@ async function performUnit(unit: Unit, context: Context): Promise<Performed> {
     case "extract": {
       const descriptor = bindDescriptor(step.target, params);
       const read = await driver.read(descriptor);
+      // Which candidate of the chain actually produced this value. The step line above names the first
+      // one, which is how a step is recognized and not a statement about what happened: on the
+      // parameterization path the first candidate is a literal read off another member's page, so it
+      // sits above an answer it did not produce. Indexed against the *bound* descriptor, since that is
+      // the chain the driver walked.
+      const resolvedAt = descriptor.candidates.indexOf(read.candidate);
       const declared = context.capability.outputs.find((output) => output.source.stepId === step.id);
       let value: unknown = read.text;
       if (declared?.type === "money") {
@@ -1039,8 +1046,15 @@ async function performUnit(unit: Unit, context: Context): Promise<Performed> {
         type: declared?.type ?? "string",
         redacted: decided.redacted,
         value: decided.value,
+        // Beside `resolvedBy` on the actions, so the evidence says which candidate read the value as
+        // clearly as it says which one clicked.
+        resolvedBy: read.candidate.strategy,
+        candidateIndex: resolvedAt,
       });
-      context.note(`  read ${step.name}${decided.redacted ? " (redacted)" : ""}`);
+      context.note(
+        `  read ${step.name}${decided.redacted ? " (redacted)" : ""}` +
+          describeResolution(read.candidate, resolvedAt, descriptor.candidates.length),
+      );
       return { kind: "done", output: { name: step.name, value: decided.value } };
     }
     case "assert":

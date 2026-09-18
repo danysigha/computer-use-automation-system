@@ -61,6 +61,16 @@ function artifact(): Capability {
 }
 
 /**
+ * The other shipped capability, read off disk the same way. Its step 3 is a *read* whose first candidate
+ * is a literal, which is the one place in this file where a fallback resolution is visible in the
+ * transcript rather than only in the artifact's chain.
+ */
+function balanceArtifact(): Capability {
+  const path = join(REPO, "capabilities", "member-savings-balance", "v1", "artifact.json");
+  return parseCapability(JSON.parse(readFileSync(path, "utf8")), "member-savings-balance");
+}
+
+/**
  * The same artifact with §28's canonical routes made literal — the control for the different-member-id
  * case.
  *
@@ -383,6 +393,37 @@ describe("replaying the recorded artifact", () => {
 /* -------------------------------------------------------------------------- */
 /* §5.2's first class: the app's own answers                                    */
 /* -------------------------------------------------------------------------- */
+
+describe("a read that resolves through a fallback", () => {
+  it("names the candidate that produced the value, not only the one the step line named", async () => {
+    // The parameterization case the README leans on. The recording was member 12345, so step 3 carries
+    // that member's literal `"$4,201.55"` first and the row-relative candidate behind it; replayed for
+    // member 12347 the literal is on nobody's page and the row-relative one reads 980.12. The step line
+    // still names the first candidate — it is how a reader recognizes the step — so the line under it
+    // has to say which one won, or the two statements read as a contradiction.
+    const surface = await surfaceWith();
+    const run = await replay(surface, {
+      entry: surface.base,
+      params: { memberId: "12347" },
+      capability: balanceArtifact(),
+    });
+
+    expect(succeeded(run.result).outputs).toEqual({ savingsBalance: 980.12 });
+    expect(run.notes).toContain(
+      '  read savingsBalance via candidate 2 of 3: row-relative[row="SAV" → cell]',
+    );
+
+    // The evidence says it as well, beside the `resolvedBy` the actions already carry: an output is a
+    // fact about a page, and which candidate read it is part of that fact.
+    const output = lineWhere(run.log, "subject", "output");
+    expect(output).toMatchObject({
+      name: "savingsBalance",
+      value: 980.12,
+      resolvedBy: "row-relative",
+      candidateIndex: 1,
+    });
+  });
+});
 
 describe("an outcome the artifact declares", () => {
   it("comes back as an answer in about a second, not as a timeout", async () => {
