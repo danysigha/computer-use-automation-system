@@ -243,6 +243,21 @@ describe("the console's grammar", () => {
     expect(parseConsoleLine("4 type")).toMatchObject({ kind: "error" });
   });
 
+  it("takes `expand`'s index on either side, and refuses one on a verb that has no use for it", () => {
+    // `expand` is the one console verb that takes a node index, so it sits where the dump's spelling
+    // (`<idx> <verb>`) meets the console's (`<verb> [idx]`). It answers to both rather than making the
+    // operator remember which side the number goes: `1 expand` used to be refused, and the refusal said
+    // `expand` was not a verb this console carries out, which it plainly is.
+    expect(parseConsoleLine("1 expand")).toMatchObject({ kind: "expand", index: 1 });
+    expect(parseConsoleLine("expand 1")).toMatchObject({ kind: "expand", index: 1 });
+
+    const indexed = parseConsoleLine("1 refresh");
+    expect(indexed.kind).toBe("error");
+    if (indexed.kind !== "error") return;
+    expect(indexed.message).toContain("takes no node index");
+    expect(indexed.message).toContain("`refresh` on its own");
+  });
+
   it("shows the escalation, the live dump and the lease — and never a typed value", async () => {
     const { controller, notes } = controllerWith({ timing: { leaseTtlMs: 10_000 } });
     void controller.escalate(request);

@@ -195,6 +195,11 @@ run log; `expand` prints the whole model — the rows the compact view summarize
 worth asking for again — and `refresh` reprints the state, because that is what a refresh is for. `help`
 prints the verbs with their descriptions:
 
+The grammar is the dump's: it numbers the nodes, so an action on one names it first — `16 click`,
+`4 type hello`. The console's own verbs are words, so they come first — `expand 1`, `refresh`,
+`pass-control-back` — and anything that takes a node index accepts it on either side, which is why the
+order is not something you have to remember.
+
 ```console
 $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07ef56f5c6a43494 --bus http://127.0.0.1:4517
 

@@ -137,10 +137,24 @@ function verbed(index: number, verb: string, tail: string): ParsedLine {
       return tail === ""
         ? { kind: "error", message: `press needs a key: \`${index} press Enter\`` }
         : { kind: "command", command: { kind: "press", index, key: tail } };
+    // `expand` is the one console verb that takes a node index, so it answers to both orders: the dump
+    // invites `<idx> <verb>`, and the console's own verbs are words that come first. Which of the two a
+    // person types should not be the thing they have to remember.
+    case "expand":
+      return { kind: "expand", index };
+    case "help":
+    case "refresh":
+    case "shot":
+    case "decline":
+    case "exit":
+      return {
+        kind: "error",
+        message: `\`${verb}\` is a console verb and takes no node index — type \`${verb}\` on its own`,
+      };
     default:
       return {
         kind: "error",
-        message: `\`${verb}\` is not a verb this console carries out — use click, type or press`,
+        message: `\`${verb}\` is not a verb this console carries out — use click, type, press or expand`,
       };
   }
 }
