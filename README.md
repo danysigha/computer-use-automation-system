@@ -49,10 +49,10 @@ Expected output (paths shortened to `<repo>/…`; everything else is verbatim):
   control bus: http://127.0.0.1:4517 (loopback only, per-request bearer)
   replay: member-savings-balance vlatest — 3 step(s) from http://localhost:4173/
   step entry: load the entry page http://localhost:4173/
-  step 1: type role=textbox[name="Member ID"] +1 fallback(s) then role=textbox[name="Member ID"] +1 fallback(s) shows "12345"
-  step 2: click role=button[name="Search"] +1 fallback(s) then the URL contains "/search?memberId=12345"
-  step 3: read text="$4,201.55" +2 fallback(s) as output "savingsBalance"
-    read savingsBalance
+  step 1: type (locator: role=textbox[name="Member ID"] +1 fallback(s)) then role=textbox[name="Member ID"] +1 fallback(s) shows "12345"
+  step 2: click (locator: role=button[name="Search"] +1 fallback(s)) then the URL contains "/search?memberId=12345"
+  step 3: read (locator: text="$4,201.55" +2 fallback(s)) as output "savingsBalance"
+    read savingsBalance = 4201.55
   success condition holds
 success
   savingsBalance: 4201.55
@@ -73,7 +73,7 @@ npm run replay -- member-savings-balance --memberId 12345 --entry 'http://localh
 # failure (replay): ELEMENT_NOT_FOUND
 #   step: 1
 #   expected: role=textbox[name="Member ID"] +1 fallback(s) shows "12345"
-#   observed: no candidate resolved uniquely (role=0 match(es), css=0 match(es))
+#   observed: no locator resolved uniquely (role=0 match(es), css=0 match(es))
 ```
 
 Read the artifact the replay just executed: it is the whole contract, and it is meant to be read by
@@ -133,20 +133,21 @@ same one; its `COMMAND.md` just names no version, because it ran while `latest` 
 ```sh
 npm run replay -- member-savings-balance --version 1 --memberId 12347
 # …
-#   step 2: click role=button[name="Search"] +1 fallback(s) then the URL contains "/search?memberId=12347"
-#   step 3: read text="$4,201.55" +2 fallback(s) as output "savingsBalance"
-#     read savingsBalance via candidate 2 of 3: row-relative[row="SAV" → cell]
+#   step 2: click (locator: role=button[name="Search"] +1 fallback(s)) then the URL contains "/search?memberId=12347"
+#   step 3: read (locator: text="$4,201.55" +2 fallback(s)) as output "savingsBalance"
+#     read savingsBalance = 980.12 via locator 2 of 3: row-relative[row="SAV" → cell]
 # success
 #   savingsBalance: 980.12
 ```
 
-Note what step 3 does there: its **first** candidate is the literal text the model actually read during
-discovery (`"$4,201.55"`), which is not on this member's page, so the chain falls through to the
-row-relative candidate ("the Balance cell of the row whose account is `SAV`") and reads the right
-number. The step line names the chain's first candidate because that is how a step is recognized; the
-line under it names the one that actually read the value, and `run.jsonl` records the same two facts on
-the output. Literal readings stay literal; the shape is what carries the reuse. The same run is kept as
-evidence: [`evidence/2026-09-18T12-30-21-326Z/`](evidence/2026-09-18T12-30-21-326Z/COMMAND.md).
+Note what step 3 does there. A step line names a **locator**: a rule for finding an element, not a value
+this run read. Its first one is the literal text the model saw during discovery, on *another* member's
+page (`"$4,201.55"`), and `+2 fallback(s)` is the chain behind it. That literal is not on this page, so
+the read falls through to the next locator, "the Balance cell of the row whose account is `SAV`" — and
+the line under the step states both facts at once: the value this run read, and the locator that read
+it. Literal readings stay literal; the shape is what carries the reuse. The artifact stores the chain
+under `candidates`; the terminal calls each one a locator. The same run is kept as evidence:
+[`evidence/2026-09-18T14-52-02-289Z/`](evidence/2026-09-18T14-52-02-289Z/COMMAND.md).
 
 Two honest limits: discovery costs **cents per run** (~4–9 turns against localhost), and it is
 **model-driven**: a re-run is a fresh recording, not a byte-identical repeat. A recorded version is
@@ -178,7 +179,7 @@ $ npm run replay -- sub-account-open --memberId 12345 --entry 'http://localhost:
 
   replay: sub-account-open vlatest — 8 step(s) from http://localhost:4173/?sim=dialog=unexpected
   …steps 1–6…
-  step 7: click role=button[name="Confirm activation"] +2 fallback(s) then the URL matches the route "/member/:id/subaccount/done"
+  step 7: click (locator: role=button[name="Confirm activation"] +2 fallback(s)) then the URL matches the route "/member/:id/subaccount/done"
   escalation: INTERSTITIAL_DIALOG — the app raised a dialog that policy does not list in `recoverableDialogs`, and the choice is a human one
     observed: Workstation policy notice: verify teller session before continuing (ref WS-4471). OK
     take over with:  npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07ef56f5c6a43494 --bus http://127.0.0.1:4517
@@ -258,8 +259,8 @@ it. That is a path the audit trail names rather than loses, but it is not the pa
 
 ```text
     the step's postcondition holds after the handback — advancing
-  step 8: read role=heading[name="Sub-Account Activated"] +2 fallback(s) as output "confirmation"
-    read confirmation
+  step 8: read (locator: role=heading[name="Sub-Account Activated"] +2 fallback(s)) as output "confirmation"
+    read confirmation = "Sub-Account Activated"
   success condition holds
 success
   confirmation: Sub-Account Activated

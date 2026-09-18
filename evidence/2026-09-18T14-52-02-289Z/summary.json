@@ -1,5 +1,5 @@
 {
-  "runId": "2026-09-18T12-30-21-326Z",
+  "runId": "2026-09-18T14-52-02-289Z",
   "capability": "member-savings-balance",
   "version": "1",
   "inputs": {
@@ -34,8 +34,8 @@
       "savingsBalance": 980.12
     },
     "evidence": {
-      "runDir": "<repo>/evidence/2026-09-18T12-30-21-326Z",
-      "runLog": "<repo>/evidence/2026-09-18T12-30-21-326Z/run.jsonl"
+      "runDir": "<repo>/evidence/2026-09-18T14-52-02-289Z",
+      "runLog": "<repo>/evidence/2026-09-18T14-52-02-289Z/run.jsonl"
     }
   }
 }
