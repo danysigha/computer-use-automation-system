@@ -1,7 +1,7 @@
 {
-  "runId": "2026-09-16T22-42-27-579Z",
+  "runId": "2026-09-18T12-30-21-326Z",
   "capability": "member-savings-balance",
-  "version": "latest",
+  "version": "1",
   "inputs": {
     "memberId": "12347"
   },
@@ -34,8 +34,8 @@
       "savingsBalance": 980.12
     },
     "evidence": {
-      "runDir": "<repo>/evidence/2026-09-16T22-42-27-579Z",
-      "runLog": "<repo>/evidence/2026-09-16T22-42-27-579Z/run.jsonl"
+      "runDir": "<repo>/evidence/2026-09-18T12-30-21-326Z",
+      "runLog": "<repo>/evidence/2026-09-18T12-30-21-326Z/run.jsonl"
     }
   }
 }

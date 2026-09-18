@@ -1,4 +1,4 @@
-# replay — member-savings-balance (latest)
+# replay — member-savings-balance (1)
 
 This directory is one run: `run.jsonl` is the step-by-step record, `summary.json` is the same run as one object, and the command below is what produced both.
 
@@ -15,7 +15,7 @@ Then, with the fixture app running in another terminal:
 
 ```sh
 npm run app
-npm run replay -- member-savings-balance --memberId 12347
+npm run replay -- member-savings-balance --version 1 --memberId 12347
 ```
 
 ## What this run ended as

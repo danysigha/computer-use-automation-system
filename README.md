@@ -143,8 +143,7 @@ row-relative candidate ("the Balance cell of the row whose account is `SAV`") an
 number. The step line names the chain's first candidate because that is how a step is recognized; the
 line under it names the one that actually read the value, and `run.jsonl` records the same two facts on
 the output. Literal readings stay literal; the shape is what carries the reuse. The same run is kept as
-evidence: [`evidence/2026-09-16T22-42-27-579Z/`](evidence/2026-09-16T22-42-27-579Z/COMMAND.md) (its log
-predates the line above — see [`evidence/README.md`](evidence/README.md)).
+evidence: [`evidence/2026-09-18T12-30-21-326Z/`](evidence/2026-09-18T12-30-21-326Z/COMMAND.md).
 
 Two honest limits: discovery costs **cents per run** (~4–9 turns against localhost), and it is
 **model-driven**: a re-run is a fresh recording, not a byte-identical repeat. A recorded version is

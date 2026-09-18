@@ -22,7 +22,7 @@ was altered.
 | [`2026-09-16T22-40-19-718Z`](2026-09-16T22-40-19-718Z/COMMAND.md) | **Known-safe dialog**: policy lists this dialog's text, so the engine accepts it and continues | `success`, `confirmation: Sub-Account Activated` (8 steps) |
 | [`2026-09-16T22-40-22-033Z`](2026-09-16T22-40-22-033Z/COMMAND.md) | **Un-declared state**: the app serves a page no outcome signature declares; the run stops cleanly with expected-vs-observed, a hint, and its evidence, exit `1` | `failure ELEMENT_NOT_FOUND` |
 | [`2026-09-16T22-40-25-611Z`](2026-09-16T22-40-25-611Z/COMMAND.md) | **Escalation and handoff**: the un-declared *dialog* variant. The run pauses and prints a takeover nonce, a second process (`npm run operator`) takes control of the same live browser session over the control bus, accepts the dialog, hands back, and the run resumes | `success` after handback (the README's two-terminal transcript is this run) |
-| [`2026-09-16T22-42-27-579Z`](2026-09-16T22-42-27-579Z/COMMAND.md) | **Parameterization**: the same artifact against a *different* member id. The recorded literal (`"$4,201.55"`) does not exist on this page, so the target chain falls through to the row-relative candidate | `success`, `savingsBalance: 980.12` |
+| [`2026-09-18T12-30-21-326Z`](2026-09-18T12-30-21-326Z/COMMAND.md) | **Parameterization**: the same artifact against a *different* member id. The recorded literal (`"$4,201.55"`) does not exist on this page, so the target chain falls through to the row-relative candidate | `success`, `savingsBalance: 980.12` |
 
 Notes a reader should have before diffing anything:
 
@@ -44,8 +44,11 @@ Notes a reader should have before diffing anything:
 - Run 1's `COMMAND.md` was written at packaging time from that run's own `summary.json`, by the same
   writer every other run's was written by: it predates the writer by a day, and rebuilding the file
   from the run's own record was more honest than hand-writing it.
-- **Run 8 predates the candidate a read resolved through being named.** Its step 3 reads 980.12 through
+- **The parameterization run was re-recorded** on 2026-09-18, when a read started naming the candidate it
+  resolved through. It is the one run here whose *transcript* changed: its step 3 reads 980.12 through
   the row-relative candidate while its step line names the literal the first candidate holds, so its log
-  says `read savingsBalance` where a run today adds `via candidate 2 of 3: row-relative[…]` and records
-  `resolvedBy`/`candidateIndex` on the output line. The facts are the same; the later run says one more
-  of them out loud.
+  now carries `via candidate 2 of 3: row-relative[…]` and `resolvedBy`/`candidateIndex` on the output,
+  where the earlier recording said only `read savingsBalance`.
+- **Runs 2, 5 and 7 predate that line as well**, so their output observations carry no
+  `resolvedBy`/`candidateIndex`. None of their reads resolved through a fallback, so their step lines and
+  transcripts are unchanged; the difference is one field per output in `run.jsonl`.
