@@ -130,7 +130,7 @@ export class ElementNotFoundError extends Error {
   constructor(framePath: readonly number[], attempts: readonly CandidateAttempt[]) {
     const detail = attempts.map(describeAttempt).join(", ");
     super(
-      `no candidate resolved uniquely at frame [${framePath.join(".") || "top"}]: ${detail || "chain was empty"}`,
+      `no locator resolved uniquely at frame [${framePath.join(".") || "top"}]: ${detail || "chain was empty"}`,
     );
     this.name = "ElementNotFoundError";
     this.attempts = attempts;

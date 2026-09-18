@@ -199,7 +199,7 @@ describe("describing a candidate chain", () => {
     expect(describeDescriptor({ candidates: [] })).toBe("an empty candidate chain");
   });
 
-  it("says which candidate a read actually came from, when it was not the first", () => {
+  it("says which locator a read actually came from, when it was not the first", () => {
     // The case this exists for: the step line names a literal read off another member's page, and the
     // value came from the row-relative candidate behind it. Silence would leave the two statements
     // looking like a contradiction.
@@ -214,7 +214,7 @@ describe("describing a candidate chain", () => {
       { strategy: "css" as const, selector: "td", index: 11 },
     ];
     expect(describeResolution(candidates[1]!, 1, candidates.length)).toBe(
-      ' via candidate 2 of 3: row-relative[row="SAV" → cell]',
+      ' via locator 2 of 3: row-relative[row="SAV" → cell]',
     );
     // Nothing to say when the step line was already the truth.
     expect(describeResolution(candidates[0]!, 0, candidates.length)).toBe("");
@@ -231,6 +231,44 @@ describe("describing a step", () => {
     );
     expect(describeStep({ id: 2, kind: "wait", condition: "fixed", ms: 250 }, p)).toBe("wait 250ms");
     expect(describeStep({ id: 3, kind: "wait", condition: "load" }, p)).toBe("wait for the page to load");
+  });
+
+  it("names a step's target a locator, so a value-shaped one cannot be read as the answer", () => {
+    const p = params({ memberId: "12345" });
+    // Step 3 of the shipped capability, whose first locator is the literal text the model saw on another
+    // member's page. Rendered as a bare `read text="$4,201.55"`, it reads like the value *this run*
+    // produced, which is how it was reported. The noun is the fix: a locator is a rule for finding an
+    // element, and the value the run read is stated on the line below the step.
+    expect(
+      describeStep(
+        {
+          id: 3,
+          kind: "extract",
+          name: "savingsBalance",
+          as: "table-cell",
+          target: {
+            candidates: [
+              { strategy: "text", text: "$4,201.55" },
+              { strategy: "css", selector: "td", index: 11 },
+            ],
+          },
+        },
+        p,
+      ),
+    ).toBe('read (locator: text="$4,201.55" +1 fallback(s)) as output "savingsBalance"');
+
+    expect(
+      describeStep(
+        {
+          id: 2,
+          kind: "act",
+          action: "click",
+          target: { candidates: [{ strategy: "role", role: "button", name: "Search" }] },
+          expect: { urlContains: "/search?memberId={memberId}" },
+        },
+        p,
+      ),
+    ).toBe('click (locator: role=button[name="Search"]) then the URL contains "/search?memberId=12345"');
   });
 });
 
@@ -430,7 +468,7 @@ describe("classifying a thrown thing", () => {
     expect(notFound.retryable).toBe(false);
     // The per-candidate counts travel with it: "2 matches" (ambiguous) and "unusable" (a broken
     // selector) are different problems with the same code, and `observed` is where they differ.
-    expect(notFound.observed).toBe("no candidate resolved uniquely (role=2 match(es), css=unusable)");
+    expect(notFound.observed).toBe("no locator resolved uniquely (role=2 match(es), css=unusable)");
 
     expect(classifyError(new FramePathError([0, 1], 1)).code).toBe("ELEMENT_NOT_FOUND");
     expect(classifyError(new PolicyBlockedError(verdict("origin"))).code).toBe("NAVIGATION_BLOCKED");

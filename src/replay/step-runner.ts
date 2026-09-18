@@ -129,7 +129,7 @@ export function describeDescriptor(descriptor: TargetDescriptor): string {
  */
 export function describeResolution(candidate: TargetCandidate, index: number, total: number): string {
   if (index === 0) return "";
-  const where = index < 0 ? "" : `candidate ${index + 1} of ${total}: `;
+  const where = index < 0 ? "" : `locator ${index + 1} of ${total}: `;
   return ` via ${where}${describeCandidate(candidate)}`;
 }
 
@@ -150,9 +150,9 @@ export function describeStep(step: Step, params: Params): string {
     case "wait":
       return step.condition === "fixed" ? `wait ${step.ms ?? 0}ms` : "wait for the page to load";
     case "act":
-      return `${step.action} ${describeDescriptor(step.target)} then ${describeAssertion(step.expect, params)}`;
+      return `${step.action} (locator: ${describeDescriptor(step.target)}) then ${describeAssertion(step.expect, params)}`;
     case "extract":
-      return `read ${describeDescriptor(step.target)} as output "${step.name}"`;
+      return `read (locator: ${describeDescriptor(step.target)}) as output "${step.name}"`;
     case "assert":
       return `check ${describeAssertion(step.condition, params)}`;
   }
@@ -369,7 +369,7 @@ export function classifyError(error: unknown): Classified {
     return {
       code: "ELEMENT_NOT_FOUND",
       retryable: false,
-      observed: `no candidate resolved uniquely${detail === "" ? "" : ` (${detail})`}`,
+      observed: `no locator resolved uniquely${detail === "" ? "" : ` (${detail})`}`,
     };
   }
   if (error instanceof FramePathError) {

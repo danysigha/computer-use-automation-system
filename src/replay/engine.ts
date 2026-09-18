@@ -87,6 +87,7 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Policy } from "../policy/policy.ts";
+import { describeValue } from "../agent/describe.ts";
 import { classify as classifyRisk, operationOf } from "../policy/risk.ts";
 import type { Redactor } from "../policy/redact.ts";
 import type { Capability, StateAssertion, Step } from "../schema/artifact.ts";
@@ -1051,8 +1052,13 @@ async function performUnit(unit: Unit, context: Context): Promise<Performed> {
         resolvedBy: read.candidate.strategy,
         candidateIndex: resolvedAt,
       });
+      // The value, then where it came from. The step line above names a locator — a rule for finding an
+      // element, which for this capability's step 3 is a literal read off another member's page — and a
+      // line that stopped at `read savingsBalance` left the reader holding two amounts with nothing
+      // saying which one this run produced. `= 980.12` is that answer, and the clause after it is the
+      // locator that produced it. A redacted output says so instead, since `= [redacted]` is noise.
       context.note(
-        `  read ${step.name}${decided.redacted ? " (redacted)" : ""}` +
+        `  read ${step.name}${decided.redacted ? " (redacted)" : ` = ${describeValue(decided.value)}`}` +
           describeResolution(read.candidate, resolvedAt, descriptor.candidates.length),
       );
       return { kind: "done", output: { name: step.name, value: decided.value } };

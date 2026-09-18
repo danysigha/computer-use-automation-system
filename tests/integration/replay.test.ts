@@ -395,7 +395,7 @@ describe("replaying the recorded artifact", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("a read that resolves through a fallback", () => {
-  it("names the candidate that produced the value, not only the one the step line named", async () => {
+  it("states the value it read, and which locator produced it", async () => {
     // The parameterization case the README leans on. The recording was member 12345, so step 3 carries
     // that member's literal `"$4,201.55"` first and the row-relative candidate behind it; replayed for
     // member 12347 the literal is on nobody's page and the row-relative one reads 980.12. The step line
@@ -410,7 +410,7 @@ describe("a read that resolves through a fallback", () => {
 
     expect(succeeded(run.result).outputs).toEqual({ savingsBalance: 980.12 });
     expect(run.notes).toContain(
-      '  read savingsBalance via candidate 2 of 3: row-relative[row="SAV" → cell]',
+      '  read savingsBalance = 980.12 via locator 2 of 3: row-relative[row="SAV" → cell]',
     );
 
     // The evidence says it as well, beside the `resolvedBy` the actions already carry: an output is a
@@ -509,7 +509,7 @@ describe("a page nothing declared", () => {
     expect(failure.errorCode).toBe("ELEMENT_NOT_FOUND");
     expect(failure.escalation).toBe("none");
     expect(failure.expected).toContain("Member ID");
-    expect(failure.observed).toContain("no candidate resolved uniquely");
+    expect(failure.observed).toContain("no locator resolved uniquely");
     // §5.3's per-code hint, from the taxonomy map rather than from this call site.
     expect(failure.hint).toContain("re-record");
     // §5.3's evidence refs: the run directory exists and holds the log this test just read.
