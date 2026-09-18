@@ -188,7 +188,13 @@ interface PendingEscalation {
   readonly request: EscalationRequest & { readonly capabilityId: string; readonly stage: RunStage };
   /** Minted at raise time and again after every lapsed lease. Single-use. */
   nonce: string;
-  readonly deadline: number;
+  /**
+   * When an unanswered escalation gives up. Moves on a re-raise, because a re-raised escalation is a
+   * new ask: a console that died just before the window closed would otherwise hand back an escalation
+   * that expires a second later, and the operator would have no chance to answer the nonce they were
+   * just given.
+   */
+  deadline: number;
   readonly raisedAt: number;
   /** The bearer the console holds, or `null` while no console is in control. */
   bearer: string | null;
@@ -553,21 +559,12 @@ export class Controller {
     }
     const now = this.#now();
 
-    if (now >= pending.deadline) {
-      await this.#surface.log({
-        kind: "note",
-        subject: "escalation",
-        message:
-          `no operator answered within ${Math.round(this.#timing.escalationTimeoutMs / 1000)}s — ` +
-          "terminating as HUMAN_UNAVAILABLE rather than hanging (§8)",
-        code: pending.request.code,
-        escalation: "no-operator",
-      });
-      this.#note("escalation unanswered — the run terminates as HUMAN_UNAVAILABLE (§8)");
-      this.#finish(pending, "unavailable");
-      return;
-    }
-
+    // The lease is checked first, and while it is live it *is* the answer to the deadline's question.
+    // §8's deadline exists so a run never parks on an escalation nobody attends; a human holding the
+    // token has attended, and the heartbeat is what proves they are still there. Checking the deadline
+    // first cut sessions off under the operator's hands at a clock set before they arrived — the run
+    // died, the bus closed, and the console went on printing "is the run still going?" at a run that was
+    // gone — while the log said "no operator answered" about an operator who was holding it.
     if (pending.bearer !== null && now > pending.leaseUntil) {
       // §8's liveness: the console stopped heartbeating (it died, or the operator walked away), so the
       // token comes back to PAUSED_ESCALATED and the escalation re-raises with a *new* nonce.
@@ -576,6 +573,7 @@ export class Controller {
       pending.digestAfterLastAction = null;
       pending.nonce = this.#mintNonce();
       pending.reRaised += 1;
+      pending.deadline = now + this.#timing.escalationTimeoutMs;
       this.#token = "paused";
       await this.#surface.log({
         kind: "note",
@@ -591,6 +589,24 @@ export class Controller {
           `control returned to the run; re-acquire with:  npm run operator -- --nonce ${pending.nonce} --bus ${this.#busUrl}`,
       );
       void previous;
+      return;
+    }
+
+    // Nobody holds the token, and the window opened when the escalation was raised (or re-raised) has
+    // closed: the run stops rather than hanging.
+    if (pending.bearer === null && now >= pending.deadline) {
+      await this.#surface.log({
+        kind: "note",
+        subject: "escalation",
+        message:
+          `no operator answered within ${Math.round(this.#timing.escalationTimeoutMs / 1000)}s — ` +
+          "terminating as HUMAN_UNAVAILABLE rather than hanging (§8)",
+        code: pending.request.code,
+        escalation: "no-operator",
+      });
+      this.#note("escalation unanswered — the run terminates as HUMAN_UNAVAILABLE (§8)");
+      this.#finish(pending, "unavailable");
+      return;
     }
   }
 

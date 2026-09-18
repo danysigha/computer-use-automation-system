@@ -248,6 +248,8 @@ export class OperatorConsole {
   #bearer = "";
   #heartbeat: NodeJS.Timeout | null = null;
   #lastDump = "";
+  /** Set when the heartbeat finds the session gone, so the read loop can end without a second message. */
+  #lost = false;
 
   constructor(options: ConsoleOptions) {
     this.#options = options;
@@ -282,6 +284,8 @@ export class OperatorConsole {
       for (;;) {
         const line = await this.#options.io.readLine("operator> ");
         if (line === null) {
+          // The heartbeat already said why the session ended, if it was the reason.
+          if (this.#lost) return 0;
           this.#options.io.out("operator: input closed — leaving control to lapse (the run re-raises)");
           return 0;
         }
@@ -385,7 +389,21 @@ export class OperatorConsole {
     this.#heartbeat = setInterval(() => {
       void this.#post("/heartbeat", { bearer: this.#bearer }).then((reply) => {
         if (reply.state === undefined) {
-          this.#options.io.out(`operator: ${errorText(reply)}`);
+          // The heartbeat is how a console proves it still holds the session, so a failure is not
+          // something to retry: either the run is gone (its escalation window closed, or its process
+          // ended) or the token moved on without us, and in both cases there is nothing left to hand
+          // back. This used to print and return, which meant the same line every heartbeat for as long
+          // as the terminal stayed open — the operator's only way out was to interrupt it. Say it once,
+          // and give the terminal back.
+          if (!this.#lost) {
+            this.#lost = true;
+            this.#options.io.out(`operator: ${errorText(reply)}`);
+            this.#options.io.out(
+              "operator: this console no longer holds the session — closing. If the run is still there, " +
+                "re-acquire with the nonce it printed",
+            );
+            this.#options.io.close?.();
+          }
           return;
         }
         // §24's liveness without the firehose: a heartbeat that finds a different page says so.

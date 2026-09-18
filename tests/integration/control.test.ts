@@ -702,8 +702,8 @@ describe("an escalation nobody holds", () => {
 
     // No heartbeats. §8's liveness rule is what makes a dead console observable: the token returns to
     // the run, the escalation re-raises, and the run never parks on a lost operator.
-    await until(() => (run.controller.escalation?.reRaised ?? 0) > 0, "the lease to lapse");
-    expect(nonceOf(run.notes)).not.toBe(firstNonce);
+    await until(() => nonceOf(run.notes) !== firstNonce, "the re-raised escalation to print its nonce");
+    expect(run.controller.escalation?.reRaised ?? 0).toBeGreaterThan(0);
     // The superseded nonce and the dead bearer are both refused, by name.
     expect((await post(run.bus.url, "/acquire", { nonce: firstNonce })).status).toBe(410);
     expect((await post(run.bus.url, "/state", { bearer: first.bearer })).status).toBe(401);
@@ -964,6 +964,128 @@ function showingIn(digest: string, text: string): number {
   if (node === undefined) throw new Error(`no node showing ${JSON.stringify(text)} in:\n${digest}`);
   return node.index;
 }
+
+describe("the escalation's clock", () => {
+  it("does not time out a session a live console is holding", async () => {
+    // The bug this exists for: the deadline was set when the escalation was raised and checked whoever
+    // held the token, so an operator who arrived late inherited the remainder of the window — and when
+    // it closed, the run terminated *under their hands* while the log said "no operator answered" about
+    // an operator who was holding it. The console was left heartbeating at a closed bus.
+    const run = await handoff({
+      capability: () => artifact(SHIPPED, "sub-account-open"),
+      entry: (base) => `${base}/?sim=dialog=unexpected`,
+      timing: {
+        waitForMs: 500,
+        retries: 0,
+        backoffMs: [],
+        heartbeatMs: 40,
+        leaseTtlMs: 400,
+        escalationTimeoutMs: 600,
+      },
+    });
+    const { bearer, state } = await acquire(run);
+
+    // Hold it for more than twice the window it was raised with, heartbeating the way a console does.
+    const until_ = Date.now() + 1_500;
+    while (Date.now() < until_) {
+      const beat = await post(run.bus.url, "/heartbeat", { bearer });
+      expect(beat.status, JSON.stringify(beat.body)).toBe(200);
+      await new Promise((done) => setTimeout(done, 60));
+    }
+
+    // The session is still ours to finish: the run is paused rather than gone, so the handback that ends
+    // this escalation is the one the operator makes. Accept the dialog first, or the resume decision
+    // finds the condition still standing and re-raises — which is the engine doing its job, not the
+    // clock doing this test's.
+    await command(run.bus.url, bearer, { kind: "click", index: nodeIndex(state, "link", "OK") });
+    const released = await post(run.bus.url, "/release", { bearer });
+    expect(released.status, JSON.stringify(released.body)).toBe(200);
+    expect((await run.result).status).toBe("success");
+  });
+
+  it("gives a re-raised escalation its own window rather than the remains of the old one", async () => {
+    // A console that dies at the end of the window hands back an escalation that would otherwise expire
+    // immediately, leaving the operator handed a nonce they have no time to use.
+    const run = await handoff({
+      capability: () => artifact(SHIPPED, "sub-account-open"),
+      entry: (base) => `${base}/?sim=dialog=unexpected`,
+      timing: {
+        waitForMs: 500,
+        retries: 0,
+        backoffMs: [],
+        heartbeatMs: 40,
+        leaseTtlMs: 200,
+        escalationTimeoutMs: 900,
+      },
+    });
+    await acquire(run);
+    const firstNonce = nonceOf(run.notes);
+    // No heartbeats: the lease lapses, and the re-raise prints a fresh nonce. Waited for as a *line*
+    // rather than as the counter, which flips a tick before the note reaches the terminal.
+    await until(() => nonceOf(run.notes) !== firstNonce, "the re-raised escalation to print its nonce");
+
+    // Re-acquire with the fresh nonce and hold it past the *original* deadline.
+    const second = await post(run.bus.url, "/acquire", { nonce: nonceOf(run.notes) });
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    const bearer = String(second.body["bearer"]);
+    const state = second.state as ConsoleState;
+    const until_ = Date.now() + 900;
+    while (Date.now() < until_) {
+      const beat = await post(run.bus.url, "/heartbeat", { bearer });
+      expect(beat.status, JSON.stringify(beat.body)).toBe(200);
+      await new Promise((done) => setTimeout(done, 60));
+    }
+
+    await command(run.bus.url, bearer, { kind: "click", index: nodeIndex(state, "link", "OK") });
+    const released = await post(run.bus.url, "/release", { bearer });
+    expect(released.status, JSON.stringify(released.body)).toBe(200);
+    expect((await run.result).status).toBe("success");
+  });
+});
+
+describe("a console whose run goes away", () => {
+  it("says so once and closes, rather than printing at a closed bus", async () => {
+    const run = await handoff({
+      capability: () => artifact(SHIPPED, "sub-account-open"),
+      entry: (base) => `${base}/?sim=dialog=unexpected`,
+      timing: {
+        waitForMs: 500,
+        retries: 0,
+        backoffMs: [],
+        heartbeatMs: 40,
+        leaseTtlMs: 400,
+        escalationTimeoutMs: 10_000,
+      },
+    });
+    await until(() => run.controller.escalation, "an escalation to be raised");
+
+    const printed: string[] = [];
+    let release: ((line: string | null) => void) | null = null;
+    const console_ = new OperatorConsole({
+      bus: run.bus.url,
+      nonce: nonceOf(run.notes),
+      heartbeatMs: 40,
+      io: {
+        out: (text: string) => printed.push(text),
+        // A terminal nobody types into: the prompt stays open while the heartbeat runs.
+        readLine: () => new Promise<string | null>((done) => (release = done)),
+        openFile: () => undefined,
+        close: () => release?.(null),
+      },
+    });
+    const exited = console_.run();
+    await until(() => printed.join("\n").includes("you hold the session"), "the console to take over");
+
+    // The run goes away exactly as it does when its window closes or its process ends.
+    await run.bus.close();
+
+    expect(await exited).toBe(0);
+    const session = printed.join("\n");
+    expect(session).toContain("this console no longer holds the session");
+    // Once, not once per heartbeat: the loop this replaced printed at every tick.
+    expect(session.split("is not answering").length - 1).toBe(1);
+  });
+});
 
 describe("a stuck discovery run", () => {
   it("asks a human, re-observes on a takeover, and continues instead of ending", async () => {
