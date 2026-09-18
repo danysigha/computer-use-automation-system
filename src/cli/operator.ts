@@ -157,12 +157,7 @@ export function terminalIo(
       if (isTerminal) outputStream.write("\r\x1b[K");
       else outputStream.write("\n");
       streams.out(`${text}\n`);
-      if (isTerminal) {
-        readline.setPrompt(showing);
-        readline.prompt(true);
-      } else {
-        outputStream.write(showing);
-      }
+      outputStream.write(showing);
     },
     readLine: (prompt) => {
       const buffered = pending.shift();
@@ -171,8 +166,12 @@ export function terminalIo(
       if (buffered !== undefined) return Promise.resolve(buffered);
       if (closed) return Promise.resolve(null);
       showing = prompt;
+      // Written here rather than through `readline.prompt()`, whose output depends on the terminal
+      // emulation readline believes it has (`TERM`, column width) — and this is the one line the cursor's
+      // position depends on. `setPrompt` keeps readline's own redraws, on the next keystroke, in
+      // agreement with what is on screen.
       readline.setPrompt(prompt);
-      readline.prompt();
+      outputStream.write(prompt);
       return new Promise<string | null>((resolve) => waiting.push(resolve));
     },
     openFile: (path) => {
