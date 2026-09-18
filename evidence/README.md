@@ -52,3 +52,6 @@ Notes a reader should have before diffing anything:
 - **Runs 2, 5 and 7 predate that line as well**, so their output observations carry no
   `resolvedBy`/`candidateIndex`. None of their reads resolved through a fallback, so their step lines and
   transcripts are unchanged; the difference is one field per output in `run.jsonl`.
+- **Run 1's outcome line is in the vocabulary of the tool as it stood.** It reads
+  `savings balance: $4,201.55` — the model's own words for the output, and the value as it was read —
+  where the same read today publishes the artifact's name and declared type, `savingsBalance: 4201.55`.
