@@ -23,6 +23,13 @@ npm ci
 npx playwright install chromium        # on Linux, add --with-deps
 ```
 
+One npm detail, since it is the first thing that trips people up: `npm run <script> -- <args>` is npm's
+way of saying "the rest of this line belongs to the script", so the tool's own grammar starts at the
+first flag after the `--`. Leave it out and npm eats the flags and forwards only their values, which the
+command then reports as an unexpected positional (`discover takes no positional arguments (got …)`)
+while npm warns that `Unknown cli config "--goal"` will stop being tolerated. Calling the entrypoint
+directly, `node src/cli/discover.ts --goal …`, is the same command with npm out of the middle.
+
 Then, in **terminal A**:
 
 ```sh
