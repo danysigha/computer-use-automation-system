@@ -273,9 +273,14 @@ That recorded run is the one `--headed` run in the evidence set, so its `COMMAND
 where the command above does not; the transcript is the same either way, since the window is a view of
 the session rather than an input to it.
 
-Worth knowing: if nobody answers, the escalation ends the run at `timing.escalationTimeoutMs`
-(default 10 min) as `HUMAN_UNAVAILABLE` rather than hanging, and the console's lease means a console
-that dies while holding the session hands it back instead of stranding it.
+Worth knowing: the escalation window is about **nobody answering**. An escalation that goes unattended
+ends the run at `timing.escalationTimeoutMs` (default 10 min) as `HUMAN_UNAVAILABLE` rather than
+hanging, but a console that holds the session *is* an answer — its heartbeat is the lease, and the
+window does not run while a live console holds the token, which is why arriving late to the demo does
+not shorten your turn. A console that dies hands the token back after the lease (10s), and the
+escalation it re-raises gets a window of its own. The other direction is covered as well: if the run
+ends while a console is holding it, the console says so once and closes, instead of asking a bus that
+is gone whether the run is still going.
 
 ---
 
