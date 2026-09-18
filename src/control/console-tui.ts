@@ -279,12 +279,41 @@ export function renderProgress(
   if (options.note !== undefined) blocks.push(`  ${options.note}`);
   const page = pageLine(state.dump);
   if (options.moved && page !== null) blocks.push(`  page: ${page}`);
+  blocks.push(...renderWorking(state, options.previousActions));
+  return blocks.join("\n");
+}
 
+/**
+ * The model in full, for `expand`: the dump without the digest's table budget, plus what is actionable,
+ * the verbs and the clock.
+ *
+ * Not the briefing. `expand` was given the whole state at first, on the grounds that asking is explicit —
+ * but what was asked for is the *model*: re-printing the escalation's preamble, its screenshot and the
+ * run-log tail answered "what is being asked", which the operator read when they took over and cannot
+ * have forgotten mid-session. They are the briefing's, and the briefing prints them once.
+ */
+export function renderModel(
+  state: ConsoleState,
+  options: { readonly note?: string; readonly previousActions: ReadonlySet<number> },
+): string {
+  const blocks: string[] = [];
+  if (options.note !== undefined) blocks.push(`  ${options.note}`);
+  blocks.push(
+    "  ── live view (indices are the agent's own numbering; `expand` shows the hidden rows) ──",
+    indent(state.dump),
+    ...renderWorking(state, options.previousActions),
+  );
+  return blocks.join("\n");
+}
+
+/** What every render after the briefing shares: what is actionable, the verbs, and the clock. */
+function renderWorking(state: ConsoleState, previousActions: ReadonlySet<number>): readonly string[] {
+  const blocks: string[] = [];
   const entries = affordanceEntries(state);
   if (entries.length > 0) {
     blocks.push("  ── actionable now ──");
     for (const entry of entries) {
-      const fresh = entry.index !== null && !options.previousActions.has(entry.index);
+      const fresh = entry.index !== null && !previousActions.has(entry.index);
       blocks.push(fresh ? `${entry.text}   ← new` : entry.text);
     }
   }
@@ -303,7 +332,7 @@ export function renderProgress(
     ? "escalation window suspended"
     : `escalation window ${Math.round(state.escalation.terminatesInMs / 1000)}s`;
   blocks.push(`  lease ${lease} · your actions: ${state.humanActions} · ${window_}`);
-  return blocks.join("\n");
+  return blocks;
 }
 
 export const COMMAND_HELP = [
@@ -426,7 +455,7 @@ export class OperatorConsole {
         // the same model, and saying "with the hidden rows shown" is a claim about a difference the
         // operator cannot see.
         const revealed = reply.state.dump !== this.#lastDump;
-        this.#brief(
+        this.#model(
           reply.state,
           node === null
             ? revealed
@@ -492,6 +521,13 @@ export class OperatorConsole {
     const previousActions = this.#lastActions;
     this.#remember(state);
     this.#options.io.out(renderProgress(state, { note, moved, previousActions }));
+  }
+
+  /** `expand`: the model, in full, without re-printing the escalation the operator already read. */
+  #model(state: ConsoleState, note?: string): void {
+    const previousActions = this.#lastActions;
+    this.#remember(state);
+    this.#options.io.out(renderModel(state, { note, previousActions }));
   }
 
   #remember(state: ConsoleState): void {

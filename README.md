@@ -190,8 +190,10 @@ $ npm run replay -- sub-account-open --memberId 12345 --entry 'http://localhost:
 and the console says which of the windows on screen is which. The first block is the *briefing*: the
 escalation, the page, and what you can act on. After that, each line you type gets the short answer —
 what you did, where the page is now if it moved, what is actionable with anything new marked, the
-console's verbs in one line, and the clock — rather than the whole state again; `refresh`, `expand` and
-`help` print everything, because asking is explicit:
+console's verbs in one line, and the clock. Nothing repeats the briefing, which is the escalation and the
+run log; `expand` prints the whole model — the rows the compact view summarizes, which is the one thing
+worth asking for again — and `refresh` reprints the state, because that is what a refresh is for. `help`
+prints the verbs with their descriptions:
 
 ```console
 $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07ef56f5c6a43494 --bus http://127.0.0.1:4517

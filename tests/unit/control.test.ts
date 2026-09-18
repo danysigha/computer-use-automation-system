@@ -14,7 +14,13 @@
 import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
 import { Controller, ControlError, type ControlSurface } from "../../src/control/controller.ts";
-import { describeCommand, parseConsoleLine, renderProgress, renderState } from "../../src/control/console-tui.ts";
+import {
+  describeCommand,
+  parseConsoleLine,
+  renderModel,
+  renderProgress,
+  renderState,
+} from "../../src/control/console-tui.ts";
 import { DEFAULT_TIMING } from "../../src/policy/policy.ts";
 import { Redactor } from "../../src/policy/redact.ts";
 import type { EvidenceLine, StampedLine } from "../../src/surface/evidence.ts";
@@ -329,6 +335,31 @@ describe("the console's grammar", () => {
     expect(renderProgress(unattended, { moved: false, previousActions: new Set() })).toContain(
       "escalation window 9s",
     );
+  });
+
+  it("prints the model for `expand`, and not the briefing again", async () => {
+    // `expand` was given the whole state at first, on the grounds that asking is explicit. What was asked
+    // for is the model: the escalation's preamble, its screenshot and the run-log tail answer "what is
+    // being asked", which the operator read when they took over.
+    const { controller, notes } = controllerWith({ timing: { leaseTtlMs: 10_000 } });
+    void controller.escalate(request);
+    await raised(controller);
+    const { state } = await controller.acquire(nonceOf(notes));
+
+    const rendered = renderModel(state, {
+      note: 'expanded — node [1] is button "Search"; indices are unchanged',
+      previousActions: new Set([0, 1]),
+    });
+    expect(rendered).toContain('expanded — node [1] is button "Search"');
+    expect(rendered).toContain("── live view");
+    expect(rendered).toContain("── actionable now ──");
+    expect(rendered).toContain("── verbs ──");
+    expect(rendered).toContain("lease 10s left · your actions: 0 · escalation window suspended");
+
+    expect(rendered).not.toContain("── escalation INTERSTITIAL_DIALOG");
+    expect(rendered).not.toContain("screenshot:");
+    expect(rendered).not.toContain("run log (tail)");
+    expect(rendered).not.toContain("you hold the session");
   });
 });
 

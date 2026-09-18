@@ -849,7 +849,9 @@ describe("the operator console", () => {
     // hand back. The index is read out of what the console *rendered*, which is what an operator does —
     // and it is the same numbering the agent's digest uses (§8, §24).
     const printed: string[] = [];
-    const script: string[] = [];
+    // An `expand` first: the operator asks to see the model, and the answer must be the model rather than
+    // the briefing they already read.
+    const script: string[] = ["expand 1"];
     const console_ = new OperatorConsole({
       bus: run.bus.url,
       nonce: nonceOf(run.notes),
@@ -888,6 +890,14 @@ describe("the operator console", () => {
     const marked = session.split("\n").filter((line) => line.includes("← new"));
     expect(marked).toHaveLength(1);
     expect(marked[0]).toContain("Return to member summary");
+
+    const afterExpand = session.slice(
+      session.indexOf('expanded — node [1] is link "Search"'),
+      session.indexOf("you ran click"),
+    );
+    expect(afterExpand).toContain("── verbs ──");
+    expect(afterExpand).not.toContain("escalation INTERSTITIAL_DIALOG");
+    expect(afterExpand).not.toContain("run log (tail)");
   });
 
   it("presses the key a person types, not the spelling the browser library wants", async () => {
