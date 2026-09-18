@@ -118,25 +118,61 @@ export function terminalIo(
   const pending: string[] = [];
   const waiting: ((line: string | null) => void)[] = [];
   let closed = false;
+  /**
+   * The prompt currently on screen, or `null` when the console is not waiting for a line.
+   *
+   * This is the whole reason the field exists. The console prints on two clocks: its own replies, and
+   * §24's heartbeat, which speaks up when the page changes while the operator is sitting at the prompt.
+   * Output that arrives during the second used to land *under* a prompt that had already been written,
+   * leaving the stale `operator>` above the block and the line the operator was typing into with no
+   * marker on it at all — the caret appears to have disappeared. So a block printed while a prompt is
+   * up clears that line first and puts the prompt back underneath, which is where the cursor is.
+   */
+  let showing: string | null = null;
+  const isTerminal = (outputStream as { isTTY?: boolean }).isTTY === true;
 
   const readline = createInterface({ input: inputStream, output: outputStream });
   readline.on("line", (line: string) => {
+    showing = null;
     const next = waiting.shift();
     if (next === undefined) pending.push(line);
     else next(line);
   });
   readline.on("close", () => {
+    showing = null;
     closed = true;
     for (const next of waiting.splice(0)) next(null);
   });
 
   return {
-    out: (text) => streams.out(`${text}\n`),
+    out: (text) => {
+      if (showing === null) {
+        streams.out(`${text}\n`);
+        return;
+      }
+      // On a terminal, erase the prompt line rather than leaving it stranded above the block; a pipe has
+      // no line to erase, so a newline closes the prompt's line the way a person pressing Enter would.
+      // Anything already typed is readline's — it holds the buffer and redraws the line on the next
+      // keystroke — so what is redrawn is the prompt, the block, and the prompt again underneath.
+      if (isTerminal) outputStream.write("\r\x1b[K");
+      else outputStream.write("\n");
+      streams.out(`${text}\n`);
+      if (isTerminal) {
+        readline.setPrompt(showing);
+        readline.prompt(true);
+      } else {
+        outputStream.write(showing);
+      }
+    },
     readLine: (prompt) => {
-      outputStream.write(prompt);
       const buffered = pending.shift();
+      // A queued line needs no prompt: it was typed (or piped) before the console was ready, and writing
+      // one only leaves an `operator>` glued to the front of the reply that follows.
       if (buffered !== undefined) return Promise.resolve(buffered);
       if (closed) return Promise.resolve(null);
+      showing = prompt;
+      readline.setPrompt(prompt);
+      readline.prompt();
       return new Promise<string | null>((resolve) => waiting.push(resolve));
     },
     openFile: (path) => {

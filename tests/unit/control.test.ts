@@ -382,6 +382,64 @@ describe("the console's grammar", () => {
 /* `npm run operator`'s grammar                                                */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/* The operator's terminal                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** One turn of the event loop, for the readline round trips below. */
+const settled = (): Promise<void> => new Promise((done) => setTimeout(done, 20));
+
+/** A fake terminal: a writable whose `isTTY` is true, recording everything written to it. */
+function fakeTerminal(): { readonly output: PassThrough; readonly written: string[] } {
+  const output = new PassThrough() as PassThrough & { isTTY?: boolean };
+  output.isTTY = true;
+  const written: string[] = [];
+  output.on("data", (chunk) => written.push(String(chunk)));
+  return { output, written };
+}
+
+describe("the operator's terminal", () => {
+  it("puts the prompt back under a block that arrives while the operator is sitting at it", async () => {
+    // §24's heartbeat speaks while the operator is at the prompt, and the prompt used to stay where it
+    // was — above the block — so the stale `operator>` sat in the middle of the screen and the line the
+    // operator was typing into had no marker on it at all. The erase-and-reprint is the fix.
+    const { output, written } = fakeTerminal();
+    const input = new PassThrough();
+    const io = terminalIo({ out: (text) => output.write(`${text}\n`), err: () => undefined }, input, output);
+
+    const line = io.readLine("operator> ");
+    await settled();
+    io.out("  the page changed while you held the session\n  lease 10s left");
+    await settled();
+    input.write("16 click\n");
+    expect(await line).toBe("16 click");
+    io.close?.();
+
+    const transcript = written.join("");
+    expect(transcript.startsWith("operator> ")).toBe(true);
+    expect(transcript).toContain("\r\u001b[K");
+    expect(transcript.indexOf("the page changed")).toBeGreaterThan(transcript.indexOf("\r\u001b[K"));
+    // The prompt is written again *after* the block, which is where the cursor ends up.
+    expect(transcript.lastIndexOf("operator> ")).toBeGreaterThan(transcript.indexOf("the page changed"));
+  });
+
+  it("writes no prompt for a line that was already queued", async () => {
+    // A piped script (`printf '16 click\n' | npm run operator …`) delivers its lines before the console
+    // is ready. Prompting for them glued an `operator>` to the front of every reply in the transcript.
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const written: string[] = [];
+    output.on("data", (chunk) => written.push(String(chunk)));
+    const io = terminalIo({ out: (text) => written.push(`${text}\n`), err: () => undefined }, input, output);
+
+    input.write("16 click\n");
+    await settled();
+    expect(await io.readLine("operator> ")).toBe("16 click");
+    io.close?.();
+    expect(written.join("")).toBe("");
+  });
+});
+
 describe("the operator command", () => {
   it("requires the nonce the run printed, and names the fix when it is missing", () => {
     const parsed = operatorArgs([]);
