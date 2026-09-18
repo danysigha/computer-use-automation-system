@@ -252,6 +252,36 @@ describe("the console's grammar", () => {
     expect(describeCommand({ kind: "type", index: 4, value: "hunter2" })).toBe("type into [4] (7 chars)");
     expect(describeCommand({ kind: "type", index: 4, value: "hunter2" })).not.toContain("hunter2");
   });
+
+  it("says the window is suspended while a console holds it, and counts it down while nobody does", async () => {
+    // The countdown used to keep running under a session the operator was holding, and once it passed it
+    // read `0s from now unless you answer` — a deadline that has expired, printed at an operator whose
+    // session the clock is not allowed to touch. `held` is the fact the renderer needed.
+    const { controller, notes } = controllerWith({ timing: { leaseTtlMs: 10_000 } });
+    void controller.escalate(request);
+    await raised(controller);
+    const { state } = await controller.acquire(nonceOf(notes));
+
+    expect(state.escalation.held).toBe(true);
+    expect(renderState(state)).toContain("terminates: suspended while you hold the session (§8)");
+
+    const unattended = { ...state, escalation: { ...state.escalation, held: false, terminatesInMs: 42_000 } };
+    expect(renderState(unattended)).toContain("terminates: 42s from now unless you answer (§8)");
+  });
+
+  it("keeps the actionable list when the model is expanded", async () => {
+    // `expand` is asked for when the operator wants to see more, and it used to drop the short list of
+    // what they can act on — so on a page with nothing hidden, expanding looked like it had taken
+    // something away rather than shown anything.
+    const { controller, notes } = controllerWith({ timing: { leaseTtlMs: 10_000 } });
+    void controller.escalate(request);
+    await raised(controller);
+    const { state } = await controller.acquire(nonceOf(notes));
+
+    const expanded = { ...state, mode: "expanded" as const };
+    expect(renderState(state)).toContain("── actionable now ──");
+    expect(renderState(expanded)).toContain("── actionable now ──");
+  });
 });
 
 /* -------------------------------------------------------------------------- */

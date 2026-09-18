@@ -168,7 +168,14 @@ export function renderEscalation(view: EscalationView): string {
     `  why:        ${view.reason}`,
     `  observed:   ${view.observed}`,
     `  run:        ${view.capabilityId} (${view.stage})   evidence: ${view.evidenceDir}`,
-    `  terminates: ${Math.round(view.terminatesInMs / 1000)}s from now unless you answer (§8)`,
+    // The window is about an escalation nobody attends, so while a console holds the token it is not
+    // running at all — and a countdown that reaches `0s from now` under a session the operator is
+    // holding reads as a deadline that has passed, which is the opposite of what is happening.
+    `  terminates: ${
+      view.held
+        ? "suspended while you hold the session (§8)"
+        : `${Math.round(view.terminatesInMs / 1000)}s from now unless you answer (§8)`
+    }`,
     "path" in view.screenshot
       ? `  screenshot: ${view.screenshot.path}`
       : `  screenshot: none — ${view.screenshot.suppressed}`,
@@ -204,7 +211,9 @@ export function renderState(state: ConsoleState, note?: string): string {
     indent(state.dump),
   ];
   const hints = affordances(state);
-  if (hints.length > 0 && state.mode === "compact") {
+  // In both renderings: `expand` is asked for when the operator wants to see more, and dropping the
+  // short list of what they can act on made it look like expanding had taken something away.
+  if (hints.length > 0) {
     blocks.push("", "  ── actionable now ──", ...hints);
   }
   if (state.logTail.length > 0) {
@@ -329,10 +338,16 @@ export class OperatorConsole {
           parsed.index === null
             ? null
             : (reply.state.snapshot.numbered[parsed.index] ?? null);
+        // Whether this page had anything to reveal. On a page with no hidden rows the two renderings are
+        // the same model, and saying "with the hidden rows shown" is a claim about a difference the
+        // operator cannot see.
+        const revealed = reply.state.dump !== this.#lastDump;
         this.#absorb(
           reply.state,
           node === null
-            ? "expanded — the same indices as the compact view, with the hidden rows shown"
+            ? revealed
+              ? "expanded — the same indices as the compact view, with the hidden rows shown"
+              : "expanded — the same model as the view above: this page hides nothing"
             : `expanded — node [${node.index}] is ${node.role} ${quote(node.name)}; indices are unchanged`,
         );
         return null;

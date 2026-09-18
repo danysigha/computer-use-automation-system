@@ -196,7 +196,7 @@ $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07
   why:        the app raised a dialog that policy does not list in `recoverableDialogs`, and the choice is a human one
   observed:   Workstation policy notice: verify teller session before continuing (ref WS-4471). OK
   run:        sub-account-open (replay)   evidence: <repo>/evidence/2026-09-16T22-40-25-611Z
-  terminates: 575s from now unless you answer (§8)
+  terminates: suspended while you hold the session (§8)
   screenshot: <repo>/evidence/2026-09-16T22-40-25-611Z/screenshots/01-escalation-interstitial-dialog.png
   token:      human   lease: 10s left of 10s (renewed every heartbeat)   your actions: 0
   you hold the session — the run is paused until you hand it back
