@@ -189,9 +189,9 @@ $ npm run replay -- sub-account-open --memberId 12345 --entry 'http://localhost:
 **Terminal B**: paste the printed nonce. Everything from here on is typed at the `operator>` prompt,
 and the console says which of the windows on screen is which. The first block is the *briefing*: the
 escalation, the page, and what you can act on. After that, each line you type gets the short answer —
-what you did, where the page is now if it moved, what is actionable with anything new marked, and the
-clock — rather than the whole state again; `refresh` and `expand` print everything, because asking is
-explicit:
+what you did, where the page is now if it moved, what is actionable with anything new marked, the
+console's verbs in one line, and the clock — rather than the whole state again; `refresh`, `expand` and
+`help` print everything, because asking is explicit:
 
 ```console
 $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07ef56f5c6a43494 --bus http://127.0.0.1:4517
@@ -243,6 +243,7 @@ $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07
   pass-control-back      hand the session back; the run re-verifies and continues
   decline                end the run: a person said no
   exit                   leave without handing back (the lease lapses, the run re-raises)
+  help                   show these verbs, with what each one does
 operator: opening the escalation screenshot in your image viewer — <repo>/evidence/2026-09-16T22-40-25-611Z/screenshots/01-escalation-interstitial-dialog.png
 
 operator> 16 click
@@ -254,6 +255,9 @@ operator> 16 click
   [2] link "Locked Accounts Report"
   [3] link "End of Day"
   [5] link "Return to member summary"   ← new
+  ── verbs ──
+  <idx> click · <idx> type <text> · <idx> press <key> · expand · refresh · shot
+  pass-control-back · decline · exit · help
   lease 10s left · your actions: 1 · escalation window suspended
 
 operator> pass-control-back

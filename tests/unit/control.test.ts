@@ -301,6 +301,10 @@ describe("the console's grammar", () => {
     // The node the previous render did not offer is the one this render points at.
     expect(rendered).toContain('[1] button "Search"   ← new');
     expect(rendered).toContain("lease 10s left · your actions: 0 · escalation window suspended");
+    // The verbs repeat, in one line rather than the briefing's ten: `pass-control-back` is what an
+    // operator forgets mid-session, and `help` is how they get the descriptions again.
+    expect(rendered).toContain("── verbs ──");
+    expect(rendered).toContain("pass-control-back · decline · exit · help");
 
     // What it deliberately does not repeat: the escalation's static preamble, its screenshot, the dump,
     // and the run-log tail. Those are the briefing's, and they are what made every action expensive.

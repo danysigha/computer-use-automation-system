@@ -289,6 +289,15 @@ export function renderProgress(
     }
   }
 
+  // The verbs repeat, because the menu is the thing an operator needs *while* working — `pass-control-back`
+  // is exactly what someone forgets two actions in — but as one line rather than the briefing's ten lines
+  // with their descriptions. The full list is a `help` away, and `help` says so here.
+  blocks.push(
+    "  ── verbs ──",
+    "  <idx> click · <idx> type <text> · <idx> press <key> · expand · refresh · shot",
+    "  pass-control-back · decline · exit · help",
+  );
+
   const lease = state.lease === null ? "not held" : `${Math.round(state.lease.expiresInMs / 1000)}s left`;
   const window_ = state.escalation.held
     ? "escalation window suspended"
@@ -309,6 +318,7 @@ export const COMMAND_HELP = [
   "  pass-control-back      hand the session back; the run re-verifies and continues",
   "  decline                end the run: a person said no",
   "  exit                   leave without handing back (the lease lapses, the run re-raises)",
+  "  help                   show these verbs, with what each one does",
 ].join("\n");
 
 function indent(text: string): string {
