@@ -13,10 +13,12 @@
  *    (reason, step, live state, screenshot, log tail), mints a ≥128-bit single-use nonce, and starts
  *    two clocks: the console must heartbeat inside `timing.heartbeatMs` or its `timing.leaseTtlMs`
  *    lease lapses, and the escalation itself terminates at `timing.escalationTimeoutMs` as
- *    `HUMAN_UNAVAILABLE` / `escalation: "no-operator"`. A lapsed lease does **not** end the run — it
- *    returns the token to `PAUSED_ESCALATED`, mints a *fresh* nonce (so a replayed one cannot
- *    re-acquire) and re-raises, which is how a console that died mid-hold becomes observable instead
- *    of a stuck token.
+ *    `HUMAN_UNAVAILABLE` / `escalation: "no-operator"` — but only while nobody holds the token: the
+ *    window is about an escalation nobody attends, and a heartbeating console is attendance, so holding
+ *    the session suspends it. A lapsed lease does **not** end the run — it returns the token to
+ *    `PAUSED_ESCALATED`, mints a *fresh* nonce (so a replayed one cannot re-acquire) and re-raises with
+ *    a window of its own, which is how a console that died mid-hold becomes observable instead of a
+ *    stuck token.
  * 2. **Authorization is per request.** Acquisition takes the nonce; every request after it — state
  *    polls included — takes the bearer minted at acquisition. That split is what §8 asks for: the
  *    nonce is the one-time credential printed in the run's terminal, and the bearer is the session

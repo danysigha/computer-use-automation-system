@@ -979,18 +979,21 @@ describe("the escalation's clock", () => {
         retries: 0,
         backoffMs: [],
         heartbeatMs: 40,
-        leaseTtlMs: 400,
+        // The lease is deliberately generous against the window: this case is about *which* of the two
+        // clocks decides, and a lease that a loaded CI machine could trip over would fail for a reason
+        // that has nothing to do with the question.
+        leaseTtlMs: 2_000,
         escalationTimeoutMs: 600,
       },
     });
     const { bearer, state } = await acquire(run);
 
-    // Hold it for more than twice the window it was raised with, heartbeating the way a console does.
-    const until_ = Date.now() + 1_500;
+    // Hold it for three times the window it was raised with, heartbeating the way a console does.
+    const until_ = Date.now() + 1_800;
     while (Date.now() < until_) {
       const beat = await post(run.bus.url, "/heartbeat", { bearer });
       expect(beat.status, JSON.stringify(beat.body)).toBe(200);
-      await new Promise((done) => setTimeout(done, 60));
+      await new Promise((done) => setTimeout(done, 250));
     }
 
     // The session is still ours to finish: the run is paused rather than gone, so the handback that ends
@@ -1014,8 +1017,8 @@ describe("the escalation's clock", () => {
         retries: 0,
         backoffMs: [],
         heartbeatMs: 40,
-        leaseTtlMs: 200,
-        escalationTimeoutMs: 900,
+        leaseTtlMs: 1_200,
+        escalationTimeoutMs: 2_000,
       },
     });
     await acquire(run);
@@ -1024,18 +1027,20 @@ describe("the escalation's clock", () => {
     // rather than as the counter, which flips a tick before the note reaches the terminal.
     await until(() => nonceOf(run.notes) !== firstNonce, "the re-raised escalation to print its nonce");
 
-    // Re-acquire with the fresh nonce and hold it past the *original* deadline.
+    // Let the clock run past the deadline the *first* escalation was raised with (2s from that raise)
+    // and stop short of the fresh one (2s from the re-raise, ~1.2s later). Re-acquiring at this point
+    // is the assertion: a re-raise that inherited the old deadline would already have ended the run.
+    // Both margins are structural rather than latency-based, since they are measured from the re-raise
+    // the run just printed.
+    await new Promise((done) => setTimeout(done, 1_200));
     const second = await post(run.bus.url, "/acquire", { nonce: nonceOf(run.notes) });
     expect(second.status, JSON.stringify(second.body)).toBe(200);
     const bearer = String(second.body["bearer"]);
     const state = second.state as ConsoleState;
-    const until_ = Date.now() + 900;
-    while (Date.now() < until_) {
-      const beat = await post(run.bus.url, "/heartbeat", { bearer });
-      expect(beat.status, JSON.stringify(beat.body)).toBe(200);
-      await new Promise((done) => setTimeout(done, 60));
-    }
 
+    // Renew the lease once before acting, so the two round trips below have a full window rather than
+    // whatever was left of this acquisition's.
+    expect((await post(run.bus.url, "/heartbeat", { bearer })).status).toBe(200);
     await command(run.bus.url, bearer, { kind: "click", index: nodeIndex(state, "link", "OK") });
     const released = await post(run.bus.url, "/release", { bearer });
     expect(released.status, JSON.stringify(released.body)).toBe(200);
