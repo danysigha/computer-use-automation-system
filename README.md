@@ -132,15 +132,19 @@ npm run replay -- member-savings-balance --version 1 --memberId 12347
 # …
 #   step 2: click role=button[name="Search"] +1 fallback(s) then the URL contains "/search?memberId=12347"
 #   step 3: read text="$4,201.55" +2 fallback(s) as output "savingsBalance"
+#     read savingsBalance via candidate 2 of 3: row-relative[row="SAV" → cell]
 # success
 #   savingsBalance: 980.12
 ```
 
-Note what step 3 does there: its **first** candidate is the literal text the model actually read
-during discovery (`"$4,201.55"`), which does not exist on this member's page, so the chain falls
-through to the row-relative candidate ("the Balance cell of the row whose account is `SAV`") and reads
-the right number. Literal readings stay literal; the shape is what carries the reuse. The same run is
-kept as evidence: [`evidence/2026-09-16T22-42-27-579Z/`](evidence/2026-09-16T22-42-27-579Z/COMMAND.md).
+Note what step 3 does there: its **first** candidate is the literal text the model actually read during
+discovery (`"$4,201.55"`), which is not on this member's page, so the chain falls through to the
+row-relative candidate ("the Balance cell of the row whose account is `SAV`") and reads the right
+number. The step line names the chain's first candidate because that is how a step is recognized; the
+line under it names the one that actually read the value, and `run.jsonl` records the same two facts on
+the output. Literal readings stay literal; the shape is what carries the reuse. The same run is kept as
+evidence: [`evidence/2026-09-16T22-42-27-579Z/`](evidence/2026-09-16T22-42-27-579Z/COMMAND.md) (its log
+predates the line above — see [`evidence/README.md`](evidence/README.md)).
 
 Two honest limits: discovery costs **cents per run** (~4–9 turns against localhost), and it is
 **model-driven**: a re-run is a fresh recording, not a byte-identical repeat. A recorded version is

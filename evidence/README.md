@@ -44,3 +44,8 @@ Notes a reader should have before diffing anything:
 - Run 1's `COMMAND.md` was written at packaging time from that run's own `summary.json`, by the same
   writer every other run's was written by: it predates the writer by a day, and rebuilding the file
   from the run's own record was more honest than hand-writing it.
+- **Run 8 predates the candidate a read resolved through being named.** Its step 3 reads 980.12 through
+  the row-relative candidate while its step line names the literal the first candidate holds, so its log
+  says `read savingsBalance` where a run today adds `via candidate 2 of 3: row-relative[…]` and records
+  `resolvedBy`/`candidateIndex` on the output line. The facts are the same; the later run says one more
+  of them out loud.
