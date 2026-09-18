@@ -110,6 +110,7 @@ the recorder's binding log, the review pass, and a saved artifact:
   binding: steps.1.expect.urlContains ← memberId (sample 12345)
   …
   review: declared 3 outcome signature(s) — NO_SUCH_ENTITY, RECORD_LOCKED, PERMISSION_DENIED
+saved member-savings-balance v2 → <repo>/capabilities/member-savings-balance/v2
 saved: <repo>/capabilities/member-savings-balance/v2/artifact.json
 success
   currentSavingsBalance: 4201.55
@@ -120,7 +121,9 @@ wording, and the recorder's translation of it, vary from run to run (`recorder: 
 output "current savings balance", which the artifact calls "currentSavingsBalance"` is a real line from
 one run). The shape (binding log, review pass, save) does not vary, and the name in that last line
 always matches the artifact's, whatever the model called the value: the model's own words reach the
-reviewer through the warning, and every name a caller sees comes from the artifact.
+reviewer through the warning, and every name a caller sees comes from the artifact. The two `saved`
+lines are one fact from two sinks: the run log's own note, and the artifact path printed for a caller
+to copy.
 
 Replay it with a different member id and the same artifact still works, which is the parameterization
 claim, not a demonstration of memorisation. This one names `--version 1` so it replays the recording
