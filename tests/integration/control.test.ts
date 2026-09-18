@@ -879,6 +879,15 @@ describe("the operator console", () => {
     expect(session).toContain("typed at this prompt");
     expect(session).toMatch(/you ran click \[\d+\] through the choke point/);
     expect(session).toContain("control handed back");
+    // The briefing is printed when the console takes over, and the render after the click is the progress
+    // one, so the escalation's preamble appears exactly once in the session rather than after every line.
+    expect(session.split("── escalation INTERSTITIAL_DIALOG").length - 1).toBe(1);
+    // And exactly what the click made available is marked: the nav links were already on offer, so the
+    // one marked line is the link the confirmation produced. Marking the whole new page as new is the
+    // bug this pins — the briefing has to remember the affordances it showed.
+    const marked = session.split("\n").filter((line) => line.includes("← new"));
+    expect(marked).toHaveLength(1);
+    expect(marked[0]).toContain("Return to member summary");
   });
 
   it("presses the key a person types, not the spelling the browser library wants", async () => {

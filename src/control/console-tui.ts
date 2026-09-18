@@ -186,13 +186,42 @@ export function renderEscalation(view: EscalationView): string {
   return lines.join("\n");
 }
 
-/** The numbered affordances, so the operator sees what is actionable without reading every line. */
-export function affordances(state: ConsoleState, limit = 12): readonly string[] {
+/** One thing the operator can act on, with the index they would type to do it. */
+interface Affordance {
+  readonly index: number | null;
+  readonly text: string;
+}
+
+function affordanceEntries(state: ConsoleState, limit = 12): readonly Affordance[] {
   const actionable = ["button", "link", "textbox", "searchbox", "combobox", "listbox", "checkbox", "radio", "option", "tab"];
   return state.snapshot.numbered
     .filter((node) => actionable.includes(node.role))
     .slice(0, limit)
-    .map((node) => `  [${node.index ?? "?"}] ${node.role} ${node.name === "" ? "(unnamed)" : quote(node.name)}`);
+    .map((node) => ({
+      index: node.index,
+      text: `  [${node.index ?? "?"}] ${node.role} ${node.name === "" ? "(unnamed)" : quote(node.name)}`,
+    }));
+}
+
+/** The numbered affordances, so the operator sees what is actionable without reading every line. */
+export function affordances(state: ConsoleState, limit = 12): readonly string[] {
+  return affordanceEntries(state, limit).map((entry) => entry.text);
+}
+
+/** Their indices, which is what "new since the last render" is decided on. */
+export function actionableIndices(state: ConsoleState, limit = 12): ReadonlySet<number> {
+  const indices = affordanceEntries(state, limit)
+    .map((entry) => entry.index)
+    .filter((index): index is number => index !== null);
+  return new Set(indices);
+}
+
+/** The dump's own identity line: `# Confirm Sub-Account — Atlas Core Console — http://…`. */
+function pageLine(dump: string): string | null {
+  return dump
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("# ")) ?? null;
 }
 
 /** The whole state block: token, lease, dump, affordances and the log tail. */
@@ -226,6 +255,48 @@ export function renderState(state: ConsoleState, note?: string): string {
   return blocks.filter((block) => block !== "").join("\n");
 }
 
+/**
+ * What the console prints after a command, or after a page that moved while it held the session.
+ *
+ * The briefing `renderState` prints answers "what am I looking at", which is a question the operator
+ * asks once. This answers the one they have after every line they type: did that work, where is the page
+ * now, what can I do next, and how long have I got. So the escalation's static preamble is not here, the
+ * dump is not here — only the page's own identity line when it moved — and the part that *is* here in
+ * full is the list of what is actionable, with anything the move just made available marked, because
+ * that is the line the operator reads to decide what to type.
+ */
+export function renderProgress(
+  state: ConsoleState,
+  options: {
+    readonly note?: string;
+    /** Whether the page moved since the last render — the only reason to print its identity line. */
+    readonly moved: boolean;
+    /** The affordances the previous render showed, so the new ones can be marked. */
+    readonly previousActions: ReadonlySet<number>;
+  },
+): string {
+  const blocks: string[] = [];
+  if (options.note !== undefined) blocks.push(`  ${options.note}`);
+  const page = pageLine(state.dump);
+  if (options.moved && page !== null) blocks.push(`  page: ${page}`);
+
+  const entries = affordanceEntries(state);
+  if (entries.length > 0) {
+    blocks.push("  ── actionable now ──");
+    for (const entry of entries) {
+      const fresh = entry.index !== null && !options.previousActions.has(entry.index);
+      blocks.push(fresh ? `${entry.text}   ← new` : entry.text);
+    }
+  }
+
+  const lease = state.lease === null ? "not held" : `${Math.round(state.lease.expiresInMs / 1000)}s left`;
+  const window_ = state.escalation.held
+    ? "escalation window suspended"
+    : `escalation window ${Math.round(state.escalation.terminatesInMs / 1000)}s`;
+  blocks.push(`  lease ${lease} · your actions: ${state.humanActions} · ${window_}`);
+  return blocks.join("\n");
+}
+
 export const COMMAND_HELP = [
   "  everything here is typed at this prompt — a browser window or a screenshot viewer is a view of the session, not an input to it",
   "",
@@ -257,6 +328,8 @@ export class OperatorConsole {
   #bearer = "";
   #heartbeat: NodeJS.Timeout | null = null;
   #lastDump = "";
+  /** The affordances the last render showed, so the next one can mark what is new. */
+  #lastActions: ReadonlySet<number> = new Set();
   /** Set when the heartbeat finds the session gone, so the read loop can end without a second message. */
   #lost = false;
 
@@ -273,9 +346,10 @@ export class OperatorConsole {
       return 2;
     }
     this.#bearer = acquired.bearer;
-    this.#lastDump = acquired.state.dump;
 
-    this.#options.io.out(renderState(acquired.state, "you hold the session — the run is paused until you hand it back"));
+    // The briefing, and it is also what the first progress render measures against: without remembering
+    // the affordances it just showed, every node on the next page counts as new.
+    this.#brief(acquired.state, "you hold the session — the run is paused until you hand it back");
     this.#options.io.out(COMMAND_HELP);
     // §24 nit 3: the escalation's screenshot is *rendered*, not merely carried.
     if ("path" in acquired.state.escalation.screenshot) {
@@ -325,7 +399,7 @@ export class OperatorConsole {
           this.#options.io.out(`operator: ${described} — refused: ${errorText(reply)}`);
           return null;
         }
-        this.#absorb(reply.state, `you ran ${described} through the choke point (actor: human, channel: console)`);
+        this.#progress(reply.state, `you ran ${described} through the choke point (actor: human, channel: console)`);
         return null;
       }
       case "expand": {
@@ -342,7 +416,7 @@ export class OperatorConsole {
         // the same model, and saying "with the hidden rows shown" is a claim about a difference the
         // operator cannot see.
         const revealed = reply.state.dump !== this.#lastDump;
-        this.#absorb(
+        this.#brief(
           reply.state,
           node === null
             ? revealed
@@ -368,7 +442,7 @@ export class OperatorConsole {
           this.#options.io.out(`operator: ${errorText(reply)}`);
           return null;
         }
-        this.#absorb(reply.state, "refreshed");
+        this.#brief(reply.state, "refreshed");
         return null;
       }
       case "release": {
@@ -393,11 +467,26 @@ export class OperatorConsole {
     }
   }
 
-  /** Show a state, unless it is the same page as last time and nothing was asked of it. */
-  #absorb(state: ConsoleState, note?: string): void {
-    const changed = state.dump !== this.#lastDump;
+  /** The briefing: everything the console knows, which is the right answer on taking over. */
+  #brief(state: ConsoleState, note?: string): void {
+    this.#remember(state);
+    this.#options.io.out(renderState(state, note));
+  }
+
+  /**
+   * After a command, or a page that moved while the console held the session: the confirmation, what
+   * moved, what is actionable now, and the clock. See `renderProgress` for what is *not* here.
+   */
+  #progress(state: ConsoleState, note?: string): void {
+    const moved = state.dump !== this.#lastDump;
+    const previousActions = this.#lastActions;
+    this.#remember(state);
+    this.#options.io.out(renderProgress(state, { note, moved, previousActions }));
+  }
+
+  #remember(state: ConsoleState): void {
     this.#lastDump = state.dump;
-    this.#options.io.out(renderState(state, note ?? (changed ? "the page changed" : undefined)));
+    this.#lastActions = actionableIndices(state);
   }
 
   #startHeartbeat(): void {
@@ -422,7 +511,9 @@ export class OperatorConsole {
           return;
         }
         // §24's liveness without the firehose: a heartbeat that finds a different page says so.
-        if (reply.state.dump !== this.#lastDump) this.#absorb(reply.state, "the page changed while you held the session");
+        if (reply.state.dump !== this.#lastDump) {
+          this.#progress(reply.state, "the page changed while you held the session");
+        }
       });
     }, this.#options.heartbeatMs);
     this.#heartbeat.unref?.();

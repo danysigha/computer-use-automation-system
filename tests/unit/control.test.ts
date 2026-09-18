@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
 import { Controller, ControlError, type ControlSurface } from "../../src/control/controller.ts";
-import { describeCommand, parseConsoleLine, renderState } from "../../src/control/console-tui.ts";
+import { describeCommand, parseConsoleLine, renderProgress, renderState } from "../../src/control/console-tui.ts";
 import { DEFAULT_TIMING } from "../../src/policy/policy.ts";
 import { Redactor } from "../../src/policy/redact.ts";
 import type { EvidenceLine, StampedLine } from "../../src/surface/evidence.ts";
@@ -281,6 +281,50 @@ describe("the console's grammar", () => {
     const expanded = { ...state, mode: "expanded" as const };
     expect(renderState(state)).toContain("── actionable now ──");
     expect(renderState(expanded)).toContain("── actionable now ──");
+  });
+
+  it("answers a command with what moved, what is actionable, and the clock — not the briefing again", async () => {
+    const { controller, notes } = controllerWith({ timing: { leaseTtlMs: 10_000 } });
+    void controller.escalate(request);
+    await raised(controller);
+    const { state } = await controller.acquire(nonceOf(notes));
+
+    // The stub page's affordances: [0] textbox "Member ID", [1] button "Search".
+    const rendered = renderProgress(state, {
+      note: "you ran click [1] through the choke point (actor: human, channel: console)",
+      moved: true,
+      previousActions: new Set([0]),
+    });
+    expect(rendered).toContain("you ran click [1] through the choke point");
+    expect(rendered).toContain("page: # stub — http://example.test/");
+    expect(rendered).toContain("── actionable now ──");
+    // The node the previous render did not offer is the one this render points at.
+    expect(rendered).toContain('[1] button "Search"   ← new');
+    expect(rendered).toContain("lease 10s left · your actions: 0 · escalation window suspended");
+
+    // What it deliberately does not repeat: the escalation's static preamble, its screenshot, the dump,
+    // and the run-log tail. Those are the briefing's, and they are what made every action expensive.
+    expect(rendered).not.toContain("escalation INTERSTITIAL_DIALOG");
+    expect(rendered).not.toContain("screenshot:");
+    expect(rendered).not.toContain("ATLAS CORE CONSOLE");
+    expect(rendered).not.toContain("run log (tail)");
+  });
+
+  it("marks nothing as new when the page offered nothing new, and counts the window when nobody holds it", async () => {
+    const { controller, notes } = controllerWith({ timing: { leaseTtlMs: 10_000 } });
+    void controller.escalate(request);
+    await raised(controller);
+    const { state } = await controller.acquire(nonceOf(notes));
+
+    const settled = renderProgress(state, { moved: false, previousActions: new Set([0, 1]) });
+    expect(settled).not.toContain("← new");
+    // Nothing moved, so there is no page line to print — and nothing to say about the page.
+    expect(settled).not.toContain("page: ");
+
+    const unattended = { ...state, escalation: { ...state.escalation, held: false, terminatesInMs: 9_000 } };
+    expect(renderProgress(unattended, { moved: false, previousActions: new Set() })).toContain(
+      "escalation window 9s",
+    );
   });
 });
 

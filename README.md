@@ -187,7 +187,11 @@ $ npm run replay -- sub-account-open --memberId 12345 --entry 'http://localhost:
 ```
 
 **Terminal B**: paste the printed nonce. Everything from here on is typed at the `operator>` prompt,
-and the console says which of the windows on screen is which:
+and the console says which of the windows on screen is which. The first block is the *briefing*: the
+escalation, the page, and what you can act on. After that, each line you type gets the short answer —
+what you did, where the page is now if it moved, what is actionable with anything new marked, and the
+clock — rather than the whole state again; `refresh` and `expand` print everything, because asking is
+explicit:
 
 ```console
 $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07ef56f5c6a43494 --bus http://127.0.0.1:4517
@@ -243,10 +247,17 @@ operator: opening the escalation screenshot in your image viewer — <repo>/evid
 
 operator> 16 click
   you ran click [16] through the choke point (actor: human, channel: console)
-    # Sub-Account Activated — Atlas Core Console — http://localhost:4173/member/12345/subaccount/done
+  page: # Sub-Account Activated — Atlas Core Console — http://localhost:4173/member/12345/subaccount/done
+  ── actionable now ──
+  [0] link "Inquiry"
+  [1] link "Search"
+  [2] link "Locked Accounts Report"
+  [3] link "End of Day"
+  [5] link "Return to member summary"   ← new
+  lease 10s left · your actions: 1 · escalation window suspended
 
 operator> pass-control-back
-operator: control handed back — the run re-verifies the page and continues
+operator: control handed back — the run re-verifies the page and continues (§8)
 ```
 
 Want the window on screen as well? Add `--headed` to terminal A. Do not click it: a visible window is
