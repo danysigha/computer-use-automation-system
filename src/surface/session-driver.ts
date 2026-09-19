@@ -963,7 +963,7 @@ function describeControl(found: RawDialog): { control: TargetDescriptor | null; 
   }
   return {
     control: { candidates: [{ strategy: "text", text: name }] },
-    via: `text=${quote(name)} (its live role ${quote(role)} is not one a role candidate may name)`,
+    via: `text=${quote(name)} (its live role ${quote(role)} is not one a role locator may name)`,
   };
 }
 

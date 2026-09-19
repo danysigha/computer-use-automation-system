@@ -1,11 +1,11 @@
 {
-  "runId": "2026-09-16T22-40-14-847Z",
+  "runId": "2026-09-19T03-58-10-544Z",
   "capability": "member-savings-balance",
   "version": "latest",
   "inputs": {
     "memberId": "12345"
   },
-  "entry": "http://localhost:4173/",
+  "entry": "http://localhost:4173/?sim=record-locked",
   "policy": "<repo>/policy/policy.json",
   "identity": {
     "expected": {
@@ -29,13 +29,10 @@
     "notes": []
   },
   "result": {
-    "status": "success",
-    "outputs": {
-      "savingsBalance": 4201.55
-    },
-    "evidence": {
-      "runDir": "<repo>/evidence/2026-09-16T22-40-14-847Z",
-      "runLog": "<repo>/evidence/2026-09-16T22-40-14-847Z/run.jsonl"
+    "status": "business-outcome",
+    "outcome": {
+      "code": "RECORD_LOCKED",
+      "message": "Member 12345 is locked"
     }
   }
 }

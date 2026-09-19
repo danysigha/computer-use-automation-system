@@ -22,7 +22,7 @@ npm run replay -- member-savings-balance --memberId 12345 --entry 'http://localh
 
 Exit code `1` — run failure — the run happened and the result is a classified failure.
 
-failure (replay): ELEMENT_NOT_FOUND — step: 1 — expected: role=textbox[name="Member ID"] +1 fallback(s) shows "12345" — observed: no candidate resolved uniquely (role=0 match(es), css=0 match(es)) — hint: every candidate in this step's target chain failed — the page moved under the artifact; check the app for a rename, then re-record the capability
+failure (replay): ELEMENT_NOT_FOUND — step: 1 — expected: role=textbox[name="Member ID"] +1 fallback(s) shows "12345" — observed: no locator resolved uniquely (role=0 match(es), css=0 match(es)) — hint: every locator in this step's target chain failed — the page moved under the artifact; check the app for a rename, then re-record the capability
 
 ## Notes
 

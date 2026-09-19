@@ -1,11 +1,11 @@
 {
-  "runId": "2026-09-16T22-40-19-718Z",
-  "capability": "sub-account-open",
+  "runId": "2026-09-19T03-58-06-875Z",
+  "capability": "member-savings-balance",
   "version": "latest",
   "inputs": {
     "memberId": "12345"
   },
-  "entry": "http://localhost:4173/?sim=dialog=known",
+  "entry": "http://localhost:4173/",
   "policy": "<repo>/policy/policy.json",
   "identity": {
     "expected": {
@@ -31,11 +31,11 @@
   "result": {
     "status": "success",
     "outputs": {
-      "confirmation": "Sub-Account Activated"
+      "savingsBalance": 4201.55
     },
     "evidence": {
-      "runDir": "<repo>/evidence/2026-09-16T22-40-19-718Z",
-      "runLog": "<repo>/evidence/2026-09-16T22-40-19-718Z/run.jsonl"
+      "runDir": "<repo>/evidence/2026-09-19T03-58-06-875Z",
+      "runLog": "<repo>/evidence/2026-09-19T03-58-06-875Z/run.jsonl"
     }
   }
 }

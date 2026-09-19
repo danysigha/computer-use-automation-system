@@ -56,8 +56,8 @@ Expected output (paths shortened to `<repo>/…`; everything else is verbatim):
   success condition holds
 success
   savingsBalance: 4201.55
-  evidence: <repo>/evidence/2026-09-16T22-40-14-847Z
-  run log: <repo>/evidence/2026-09-16T22-40-14-847Z/run.jsonl
+  evidence: <repo>/evidence/2026-09-19T03-58-06-875Z
+  run log: <repo>/evidence/2026-09-19T03-58-06-875Z/run.jsonl
 ```
 
 Two more replays worth running, because they show the two ways a run can end without being broken:
@@ -206,9 +206,9 @@ $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07
 ── escalation INTERSTITIAL_DIALOG — step 7 ────────
   why:        the app raised a dialog that policy does not list in `recoverableDialogs`, and the choice is a human one
   observed:   Workstation policy notice: verify teller session before continuing (ref WS-4471). OK
-  run:        sub-account-open (replay)   evidence: <repo>/evidence/2026-09-16T22-40-25-611Z
+  run:        sub-account-open (replay)   evidence: <repo>/evidence/2026-09-19T03-58-16-557Z
   terminates: suspended while you hold the session (§8)
-  screenshot: <repo>/evidence/2026-09-16T22-40-25-611Z/screenshots/01-escalation-interstitial-dialog.png
+  screenshot: <repo>/evidence/2026-09-19T03-58-16-557Z/screenshots/01-escalation-interstitial-dialog.png
   token:      human   lease: 10s left of 10s (renewed every heartbeat)   your actions: 0
   you hold the session — the run is paused until you hand it back
   ── live view (indices are the agent's own numbering; `expand` shows the hidden rows) ──
@@ -251,7 +251,7 @@ $ npm run operator -- --nonce 4c805d2850fe80bbbf0e5ad65e0c34bee2b85bece2e153ec07
   decline                end the run: a person said no
   exit                   leave without handing back (the lease lapses, the run re-raises)
   help                   show these verbs, with what each one does
-operator: opening the escalation screenshot in your image viewer — <repo>/evidence/2026-09-16T22-40-25-611Z/screenshots/01-escalation-interstitial-dialog.png
+operator: opening the escalation screenshot in your image viewer — <repo>/evidence/2026-09-19T03-58-16-557Z/screenshots/01-escalation-interstitial-dialog.png
 
 operator> 16 click
   you ran click [16] through the choke point (actor: human, channel: console)
@@ -290,10 +290,8 @@ success
 
 The run never re-issued the submit (a double submission would have been a real business action), and
 its `run.jsonl` records the human's click, the handback, and the resume decision that followed. The
-whole exchange is preserved in [`evidence/2026-09-16T22-40-25-611Z/`](evidence/2026-09-16T22-40-25-611Z/COMMAND.md).
-That recorded run is the one `--headed` run in the evidence set, so its `COMMAND.md` says `--headed`
-where the command above does not; the transcript is the same either way, since the window is a view of
-the session rather than an input to it.
+whole exchange is preserved in [`evidence/2026-09-19T03-58-16-557Z/`](evidence/2026-09-19T03-58-16-557Z/COMMAND.md),
+which was recorded with the command above — headless, like every replay in the set.
 
 Worth knowing: the escalation window is about **nobody answering**. An escalation that goes unattended
 ends the run at `timing.escalationTimeoutMs` (default 10 min) as `HUMAN_UNAVAILABLE` rather than

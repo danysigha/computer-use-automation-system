@@ -1,11 +1,11 @@
 {
-  "runId": "2026-09-16T22-40-25-611Z",
+  "runId": "2026-09-19T03-59-28-629Z",
   "capability": "sub-account-open",
   "version": "latest",
   "inputs": {
     "memberId": "12345"
   },
-  "entry": "http://localhost:4173/?sim=dialog=unexpected",
+  "entry": "http://localhost:4173/?sim=dialog=known",
   "policy": "<repo>/policy/policy.json",
   "identity": {
     "expected": {
@@ -34,8 +34,8 @@
       "confirmation": "Sub-Account Activated"
     },
     "evidence": {
-      "runDir": "<repo>/evidence/2026-09-16T22-40-25-611Z",
-      "runLog": "<repo>/evidence/2026-09-16T22-40-25-611Z/run.jsonl"
+      "runDir": "<repo>/evidence/2026-09-19T03-59-28-629Z",
+      "runLog": "<repo>/evidence/2026-09-19T03-59-28-629Z/run.jsonl"
     }
   }
 }

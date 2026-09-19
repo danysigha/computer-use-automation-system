@@ -1,11 +1,11 @@
 {
-  "runId": "2026-09-16T22-40-18-090Z",
-  "capability": "member-savings-balance",
+  "runId": "2026-09-19T03-58-16-557Z",
+  "capability": "sub-account-open",
   "version": "latest",
   "inputs": {
     "memberId": "12345"
   },
-  "entry": "http://localhost:4173/?sim=record-locked",
+  "entry": "http://localhost:4173/?sim=dialog=unexpected",
   "policy": "<repo>/policy/policy.json",
   "identity": {
     "expected": {
@@ -29,10 +29,13 @@
     "notes": []
   },
   "result": {
-    "status": "business-outcome",
-    "outcome": {
-      "code": "RECORD_LOCKED",
-      "message": "Member 12345 is locked"
+    "status": "success",
+    "outputs": {
+      "confirmation": "Sub-Account Activated"
+    },
+    "evidence": {
+      "runDir": "<repo>/evidence/2026-09-19T03-58-16-557Z",
+      "runLog": "<repo>/evidence/2026-09-19T03-58-16-557Z/run.jsonl"
     }
   }
 }

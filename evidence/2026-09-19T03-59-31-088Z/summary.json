@@ -1,5 +1,5 @@
 {
-  "runId": "2026-09-16T22-40-22-033Z",
+  "runId": "2026-09-19T03-59-31-088Z",
   "capability": "member-savings-balance",
   "version": "latest",
   "inputs": {
@@ -34,11 +34,11 @@
     "stepId": 1,
     "errorCode": "ELEMENT_NOT_FOUND",
     "expected": "role=textbox[name=\"Member ID\"] +1 fallback(s) shows \"12345\"",
-    "observed": "no candidate resolved uniquely (role=0 match(es), css=0 match(es))",
-    "hint": "every candidate in this step's target chain failed — the page moved under the artifact; check the app for a rename, then re-record the capability",
+    "observed": "no locator resolved uniquely (role=0 match(es), css=0 match(es))",
+    "hint": "every locator in this step's target chain failed — the page moved under the artifact; check the app for a rename, then re-record the capability",
     "evidence": {
-      "runDir": "<repo>/evidence/2026-09-16T22-40-22-033Z",
-      "runLog": "<repo>/evidence/2026-09-16T22-40-22-033Z/run.jsonl"
+      "runDir": "<repo>/evidence/2026-09-19T03-59-31-088Z",
+      "runLog": "<repo>/evidence/2026-09-19T03-59-31-088Z/run.jsonl"
     },
     "escalation": "none"
   }

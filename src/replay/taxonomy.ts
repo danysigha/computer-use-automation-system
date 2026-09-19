@@ -140,7 +140,7 @@ export const HINTS: Readonly<Record<TaxonomyCode, string>> = {
     "than the app's session lifetime will hit this every time",
 
   ELEMENT_NOT_FOUND:
-    "every candidate in this step's target chain failed — the page moved under the artifact; check " +
+    "every locator in this step's target chain failed — the page moved under the artifact; check " +
     "the app for a rename, then re-record the capability",
   CHECKPOINT_MISMATCH:
     "the step ran but the page never showed what it expected — `observed` names what it showed " +
