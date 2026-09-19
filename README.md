@@ -11,6 +11,10 @@ app (`sample-app/`) with framesets, headerless nested tables, duplicate text, no
 `?sim=` switch that makes it fail on purpose (record locked, session expired, an unexpected dialog,
 an undeclared error page). Everything below runs locally; no accounts, no network targets.
 
+**Video walkthrough** (5 min, unlisted): [youtu.be/KsP-K9uAejY](https://youtu.be/KsP-K9uAejY) — this
+process, narrated, for a reader who would rather watch it once than run it. The link is unlisted, so it
+plays for anyone holding it and appears in no search.
+
 ---
 
 ## Quick demo (no API key)
